@@ -1,0 +1,147 @@
+[build-system]
+requires = ["setuptools>=75.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "quantx"
+version = "0.1.0"
+description = "QuantX — AI Trading Research Platform"
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.13"
+authors = [
+    {name = "QuantX Team"},
+]
+
+dependencies = [
+    # Web Framework
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.32.0",
+    "python-multipart>=0.0.18",
+
+    # Database
+    "sqlalchemy[asyncio]>=2.0.36",
+    "asyncpg>=0.30.0",
+    "alembic>=1.14.0",
+    "greenlet>=3.1.0",
+
+    # Redis
+    "redis[hiredis]>=5.2.0",
+
+    # Authentication
+    "python-jose[cryptography]>=3.3.0",
+    "passlib[bcrypt]>=1.7.4",
+    "bcrypt>=4.2.0",
+
+    # Validation & Settings
+    "pydantic>=2.10.0",
+    "pydantic-settings>=2.7.0",
+    "email-validator>=2.2.0",
+
+    # HTTP Client
+    "httpx>=0.28.0",
+
+    # Binance
+    "python-binance>=1.0.22",
+    "websockets>=14.0",
+
+    # OpenAI
+    "openai>=1.58.0",
+
+    # Task Queue
+    "celery[redis]>=5.4.0",
+
+    # Data Processing
+    "numpy>=2.2.0",
+    "pandas>=2.2.0",
+
+    # Monitoring
+    "prometheus-fastapi-instrumentator>=7.0.0",
+
+    # Logging
+    "structlog>=24.4.0",
+    "python-json-logger>=3.2.0",
+
+    # Utilities
+    "python-dateutil>=2.9.0",
+    "orjson>=3.10.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    # Testing
+    "pytest>=8.3.0",
+    "pytest-asyncio>=0.25.0",
+    "pytest-cov>=6.0.0",
+    "pytest-mock>=3.14.0",
+    "httpx>=0.28.0",
+    "factory-boy>=3.3.0",
+    "faker>=33.0.0",
+
+    # Linting & Formatting
+    "ruff>=0.8.0",
+    "mypy>=1.14.0",
+
+    # Type stubs
+    "types-python-dateutil>=2.9.0",
+    "types-redis>=4.6.0",
+    "sqlalchemy-stubs>=0.4",
+
+    # Dev utilities
+    "ipython>=8.30.0",
+    "watchdog>=6.0.0",
+]
+
+[tool.ruff]
+target-version = "py313"
+line-length = 120
+src = ["app"]
+
+[tool.ruff.lint]
+select = [
+    "E",      # pycodestyle errors
+    "W",      # pycodestyle warnings
+    "F",      # pyflakes
+    "I",      # isort
+    "N",      # pep8-naming
+    "UP",     # pyupgrade
+    "B",      # flake8-bugbear
+    "SIM",    # flake8-simplify
+    "TCH",    # flake8-type-checking
+    "RUF",    # ruff-specific
+]
+ignore = ["E501"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["app"]
+
+[tool.mypy]
+python_version = "3.13"
+strict = true
+warn_return_any = true
+warn_unused_configs = true
+plugins = ["pydantic.mypy"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+# The test engine and its asyncpg pool are created once per session, and an
+# asyncpg connection is bound to the loop that created it. Both fixtures and
+# tests therefore have to run on the same session-scoped loop, otherwise every
+# DB test fails with "attached to a different loop".
+asyncio_default_fixture_loop_scope = "session"
+asyncio_default_test_loop_scope = "session"
+addopts = "-v --tb=short --strict-markers"
+markers = [
+    "unit: Unit tests",
+    "integration: Integration tests",
+    "slow: Slow-running tests",
+]
+
+[tool.coverage.run]
+source = ["app"]
+omit = ["*/tests/*", "*/alembic/*"]
+
+[tool.coverage.report]
+fail_under = 80
+show_missing = true

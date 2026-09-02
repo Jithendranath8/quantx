@@ -1,0 +1,250 @@
+# ======================================================================
+# QuantX — Docker Compose (Production)
+# ======================================================================
+#
+# Notes on the layout:
+# - Datastore ports are NOT published to the host. Publishing 5432/6379 with
+#   the compose default password exposed the database and an unauthenticated
+#   Redis on every host interface. Use `docker compose exec` for admin access.
+# - Redis is split in two: a cache instance (LRU eviction) and a broker
+#   instance (noeviction). A broker that evicts silently drops queued jobs.
+# - A one-shot `migrate` service runs `alembic upgrade head` before the API
+#   starts; nothing applied migrations previously, so the backend booted
+#   against an empty schema.
+
+# All four backend services run the SAME code, so they share one image built
+# once. Without an explicit `image:` name Compose derives a separate name per
+# service, builds the identical context four times, and -- worse -- a targeted
+# `docker compose build backend` leaves the workers running stale code.
+x-backend-build: &backend-build
+  image: quantx-backend:local
+  build:
+    context: ./backend
+    dockerfile: Dockerfile
+    target: production
+
+x-backend-env: &backend-env
+  # Lets the container reach services on the host (e.g. a local Ollama at
+  # host.docker.internal:11434). Docker Desktop provides this name already;
+  # the mapping makes it work on plain Linux Docker too.
+  extra_hosts:
+    - "host.docker.internal:host-gateway"
+  env_file:
+    - .env
+  environment:
+    - POSTGRES_HOST=postgres
+    - REDIS_HOST=redis
+    - CELERY_BROKER_URL=redis://:${REDIS_PASSWORD:?REDIS_PASSWORD must be set}@redis-broker:6379/1
+    - CELERY_RESULT_BACKEND=redis://:${REDIS_PASSWORD:?REDIS_PASSWORD must be set}@redis-broker:6379/2
+
+services:
+  # ----- PostgreSQL -----
+  postgres:
+    image: postgres:16-alpine
+    container_name: quantx-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-quantx}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
+      POSTGRES_DB: ${POSTGRES_DB:-quantx}
+    expose:
+      - "5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./docker/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    # API workers plus Celery workers each hold their own pool; the default
+    # max_connections of 100 is not enough headroom once both scale out.
+    command:
+      - "postgres"
+      - "-c"
+      - "max_connections=200"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-quantx} -d ${POSTGRES_DB:-quantx}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ----- Redis (cache & pub/sub) -----
+  redis:
+    image: redis:7-alpine
+    container_name: quantx-redis
+    restart: unless-stopped
+    expose:
+      - "6379"
+    volumes:
+      - ./docker/redis/redis.conf:/usr/local/etc/redis/redis.conf:ro
+    command:
+      - "sh"
+      - "-c"
+      - "redis-server /usr/local/etc/redis/redis.conf --requirepass \"$$REDIS_PASSWORD\""
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD must be set}
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a \"$$REDIS_PASSWORD\" ping | grep -q PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ----- Redis (Celery broker & results) -----
+  redis-broker:
+    image: redis:7-alpine
+    container_name: quantx-redis-broker
+    restart: unless-stopped
+    expose:
+      - "6379"
+    volumes:
+      - redis_broker_data:/data
+      - ./docker/redis/redis-broker.conf:/usr/local/etc/redis/redis.conf:ro
+    command:
+      - "sh"
+      - "-c"
+      - "redis-server /usr/local/etc/redis/redis.conf --requirepass \"$$REDIS_PASSWORD\""
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD must be set}
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a \"$$REDIS_PASSWORD\" ping | grep -q PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ----- Database migrations (runs once, before the API) -----
+  migrate:
+    <<: [*backend-build, *backend-env]
+    container_name: quantx-migrate
+    command: ["alembic", "upgrade", "head"]
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  # ----- Backend API -----
+  backend:
+    <<: [*backend-build, *backend-env]
+    container_name: quantx-backend
+    restart: unless-stopped
+    expose:
+      - "8000"
+    ports:
+      - "127.0.0.1:8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      redis-broker:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    volumes:
+      - backend_logs:/app/logs
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health').status==200 else 1)\""]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+  # ----- Celery Worker -----
+  celery-worker:
+    <<: [*backend-build, *backend-env]
+    container_name: quantx-celery-worker
+    restart: unless-stopped
+    command:
+      - "celery"
+      - "-A"
+      - "app.core.celery_app"
+      - "worker"
+      - "--loglevel=info"
+      - "--concurrency=${CELERY_CONCURRENCY:-4}"
+      - "--max-tasks-per-child=100"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis-broker:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD-SHELL", "celery -A app.core.celery_app inspect ping -d celery@$$HOSTNAME"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  # ----- Celery Beat (Scheduler) -----
+  celery-beat:
+    <<: [*backend-build, *backend-env]
+    container_name: quantx-celery-beat
+    restart: unless-stopped
+    command:
+      - "celery"
+      - "-A"
+      - "app.core.celery_app"
+      - "beat"
+      - "--loglevel=info"
+      - "--schedule=/tmp/celerybeat-schedule"
+    depends_on:
+      redis-broker:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+
+  # ----- Frontend -----
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      target: production
+    container_name: quantx-frontend
+    restart: unless-stopped
+    ports:
+      - "5173:80"
+    depends_on:
+      backend:
+        condition: service_started
+
+  # ----- Prometheus -----
+  prometheus:
+    image: prom/prometheus:v2.53.0
+    container_name: quantx-prometheus
+    restart: unless-stopped
+    expose:
+      - "9090"
+    ports:
+      - "127.0.0.1:9090:9090"
+    volumes:
+      - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      # Created by the operator; see monitoring/prometheus/prometheus.yml.
+      - ./monitoring/prometheus/metrics_password:/etc/prometheus/metrics_password:ro
+      - prometheus_data:/prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.retention.time=30d"
+    depends_on:
+      backend:
+        condition: service_started
+
+  # ----- Grafana -----
+  grafana:
+    image: grafana/grafana:11.1.0
+    container_name: quantx-grafana
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?GRAFANA_ADMIN_PASSWORD must be set}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    ports:
+      - "127.0.0.1:3000:3000"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+    depends_on:
+      prometheus:
+        condition: service_started
+
+volumes:
+  postgres_data:
+  redis_broker_data:
+  backend_logs:
+  prometheus_data:
+  grafana_data:

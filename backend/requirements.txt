@@ -1,0 +1,52 @@
+# Core
+fastapi>=0.115.0
+uvicorn[standard]>=0.32.0
+python-multipart>=0.0.18
+
+# Database
+sqlalchemy[asyncio]>=2.0.36
+asyncpg>=0.30.0
+alembic>=1.14.0
+greenlet>=3.1.0
+
+# Redis
+redis[hiredis]>=5.2.0
+
+# Auth
+python-jose[cryptography]>=3.3.0
+# passlib was removed: its last release (1.7.4, 2020) reads bcrypt.__about__,
+# which bcrypt 4.1 deleted, so passlib + bcrypt>=4.1 fails at hash time.
+# app.core.security calls bcrypt directly instead.
+bcrypt>=4.2.0
+
+# Validation
+pydantic>=2.10.0
+pydantic-settings>=2.7.0
+email-validator>=2.2.0
+
+# HTTP
+httpx>=0.28.0
+
+# Binance (REST via httpx in app.connectors; python-binance is not used)
+websockets>=14.0
+
+# OpenAI
+openai>=1.58.0
+
+# Tasks
+celery[redis]>=5.4.0
+
+# Data
+numpy>=2.2.0
+pandas>=2.2.0
+
+# Monitoring
+prometheus-fastapi-instrumentator>=7.0.0
+
+# Logging
+structlog>=24.4.0
+python-json-logger>=3.2.0
+
+# Utilities
+python-dateutil>=2.9.0
+uvloop>=0.21.0

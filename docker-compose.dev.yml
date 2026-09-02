@@ -1,0 +1,59 @@
+# ======================================================================
+# QuantX — Docker Compose (Development)
+# ======================================================================
+# Datastores only, published on localhost so you can run the API and workers
+# directly on the host with hot reload.
+#
+#   docker compose -f docker-compose.dev.yml up -d
+#   cd backend && alembic upgrade head && uvicorn app.main:app --reload
+#   cd frontend && npm run dev
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: quantx-postgres-dev
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-quantx}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-quantx_dev_password}
+      POSTGRES_DB: ${POSTGRES_DB:-quantx}
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - postgres_dev_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-quantx}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: quantx-redis-dev
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:6379:6379"
+    command: ["redis-server", "--maxmemory", "256mb", "--maxmemory-policy", "allkeys-lru", "--save", ""]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Separate broker even in development, so behaviour matches production:
+  # a broker must never evict queued jobs.
+  redis-broker:
+    image: redis:7-alpine
+    container_name: quantx-redis-broker-dev
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:6380:6379"
+    command: ["redis-server", "--maxmemory", "256mb", "--maxmemory-policy", "noeviction", "--appendonly", "yes"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres_dev_data:
