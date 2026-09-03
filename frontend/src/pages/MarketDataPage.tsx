@@ -1,0 +1,283 @@
+import { useEffect, useState } from 'react';
+import { RefreshCw, TrendingUp } from 'lucide-react';
+
+import api from '../lib/api';
+import { formatDateTime, formatNumber, formatSignedPercent } from '../lib/format';
+import { useAction, useApi, usePolling } from '../lib/useApi';
+import { useMarketStream } from '../lib/useMarketStream';
+import type { Candle, MarketCoverage, Orderbook, Ticker } from '../lib/types';
+import {
+  AsyncSection,
+  Badge,
+  Button,
+  Card,
+  Field,
+  PageHeader,
+  Select,
+  StatTile,
+  TableWrap,
+  Td,
+  Th,
+} from '../components/ui';
+
+interface StreamStatusResponse {
+  enabled: boolean;
+  status: string;
+  symbols: string[];
+  age_seconds: number | null;
+}
+
+export default function MarketDataPage() {
+  const [symbol, setSymbol] = useState('BTCUSDT');
+  const [timeframe, setTimeframe] = useState('1h');
+  const [livePrice, setLivePrice] = useState<number | null>(null);
+
+  // Only open a socket when the server is actually ingesting.
+  const stream = useApi<StreamStatusResponse>(
+    () => api.get<StreamStatusResponse>('/health/stream').then((r) => r.data),
+  );
+  const streamEnabled = stream.data?.enabled ?? false;
+
+  const live = useMarketStream(symbol, {
+    enabled: streamEnabled,
+    onEvent: (event) => {
+      if (event.event_type === 'kline' && typeof event.close === 'number') {
+        setLivePrice(event.close);
+      }
+    },
+  });
+
+  useEffect(() => {
+    setLivePrice(null);
+  }, [symbol]);
+
+  const symbols = useApi<string[]>(() => api.get<string[]>('/market/symbols').then((r) => r.data));
+  const timeframes = useApi<string[]>(
+    () => api.get<string[]>('/market/timeframes').then((r) => r.data),
+  );
+  const coverage = useApi<MarketCoverage>(
+    () => api.get<MarketCoverage>('/market/coverage').then((r) => r.data),
+  );
+
+  // What the backend actually holds for the pair on screen, so an empty table
+  // can say why it is empty instead of looking like a failed request.
+  const pairCoverage = coverage.data?.coverage.find(
+    (c) => c.symbol === symbol && c.timeframe === timeframe,
+  );
+
+  const sync = useAction(async () => {
+    await api.post('/market/sync');
+  });
+  const ticker = useApi<Ticker>(
+    () => api.get<Ticker>('/market/ticker', { params: { symbol } }).then((r) => r.data),
+    [symbol],
+  );
+  const candles = useApi<Candle[]>(
+    () =>
+      api
+        .get<Candle[]>('/market/klines', { params: { symbol, timeframe, limit: 100 } })
+        .then((r) => r.data),
+    [symbol, timeframe],
+  );
+  const book = useApi<Orderbook>(
+    () => api.get<Orderbook>('/market/orderbook', { params: { symbol, limit: 10 } }).then((r) => r.data),
+    [symbol],
+  );
+
+  // Polling is the fallback. When the WebSocket is delivering ticks the price
+  // is already live, so only the depth snapshot needs refreshing.
+  usePolling(
+    () => {
+      if (live.status !== 'open') ticker.reload();
+      book.reload();
+    },
+    15_000,
+  );
+
+  const change = ticker.data?.priceChangePercent ? Number(ticker.data.priceChangePercent) : null;
+  const restPrice = ticker.data?.lastPrice ? Number(ticker.data.lastPrice) : null;
+  const displayPrice = livePrice ?? restPrice;
+
+  const streamBadge =
+    live.status === 'open'
+      ? { tone: 'positive' as const, label: `live · ${live.messageCount} ticks` }
+      : streamEnabled
+        ? { tone: 'warning' as const, label: `stream ${live.status}` }
+        : { tone: 'neutral' as const, label: 'polling (stream disabled)' };
+
+  return (
+    <div className="space-y-6">
+      <PageHeader
+        title="Market Data"
+        description="Live prices, depth, and stored candles"
+        actions={
+          <div className="flex items-center gap-3">
+            {coverage.data && (
+              <Badge tone={coverage.data.pairs_missing === 0 ? 'positive' : 'warning'}>
+                {coverage.data.pairs_with_data}/{coverage.data.pairs_total} pairs ·{' '}
+                {coverage.data.total_candles.toLocaleString()} candles
+              </Badge>
+            )}
+            <Badge tone={streamBadge.tone}>{streamBadge.label}</Badge>
+            <Button
+              variant="secondary"
+              onClick={async () => {
+                await sync.run();
+                coverage.reload();
+              }}
+              disabled={sync.pending}
+            >
+              {sync.pending ? 'Syncing…' : 'Sync market data'}
+            </Button>
+            <Button variant="secondary" onClick={() => { ticker.reload(); candles.reload(); book.reload(); coverage.reload(); }}>
+              <span className="flex items-center gap-1.5"><RefreshCw className="w-3 h-3" /> Refresh</span>
+            </Button>
+          </div>
+        }
+      />
+
+      <div className="flex flex-wrap gap-4">
+        <Field label="Symbol">
+          <Select value={symbol} onChange={(e) => setSymbol(e.target.value)}>
+            {(symbols.data ?? [symbol]).map((s) => (
+              <option key={s} value={s}>{s}</option>
+            ))}
+          </Select>
+        </Field>
+        <Field label="Timeframe">
+          <Select value={timeframe} onChange={(e) => setTimeframe(e.target.value)}>
+            {(timeframes.data ?? [timeframe]).map((tf) => (
+              <option key={tf} value={tf}>{tf}</option>
+            ))}
+          </Select>
+        </Field>
+      </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <StatTile
+          label="Last Price"
+          value={displayPrice !== null ? formatNumber(displayPrice) : '—'}
+          sub={
+            livePrice !== null
+              ? 'streaming'
+              : change !== null
+                ? formatSignedPercent(change)
+                : undefined
+          }
+          tone={change === null ? 'neutral' : change >= 0 ? 'positive' : 'negative'}
+          icon={<TrendingUp className="w-4 h-4" />}
+        />
+        <StatTile label="24h High" value={ticker.data?.highPrice ? formatNumber(Number(ticker.data.highPrice)) : '—'} />
+        <StatTile label="24h Low" value={ticker.data?.lowPrice ? formatNumber(Number(ticker.data.lowPrice)) : '—'} />
+        <StatTile
+          label="24h Volume"
+          value={ticker.data?.volume ? formatNumber(Number(ticker.data.volume), 0) : '—'}
+        />
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <Card title={`Candles · ${symbol} ${timeframe}`} className="lg:col-span-2">
+          <AsyncSection
+            state={candles}
+            emptyWhen={(d) => d.length === 0}
+            emptyMessage={`No stored candles for ${symbol} ${timeframe}`}
+            emptyHint={
+              pairCoverage && !pairCoverage.has_data
+                ? 'This pair has not been ingested yet. Use Sync market data above; a background job also tops up every pair every 10 minutes.'
+                : 'The backfill may still be running for this pair.'
+            }
+          >
+            {(data) => (
+              <TableWrap>
+                <table className="w-full">
+                  <thead className="bg-slate-900/60">
+                    <tr>
+                      <Th>Time</Th>
+                      <Th align="right">Open</Th>
+                      <Th align="right">High</Th>
+                      <Th align="right">Low</Th>
+                      <Th align="right">Close</Th>
+                      <Th align="right">Volume</Th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-800/50">
+                    {[...data].reverse().slice(0, 25).map((c) => (
+                      <tr key={c.timestamp} className="hover:bg-slate-800/30 transition-colors">
+                        <Td className="text-slate-400">{formatDateTime(c.timestamp)}</Td>
+                        <Td align="right" mono className="text-slate-300">{formatNumber(c.open)}</Td>
+                        <Td align="right" mono className="text-emerald-400">{formatNumber(c.high)}</Td>
+                        <Td align="right" mono className="text-red-400">{formatNumber(c.low)}</Td>
+                        <Td align="right" mono className="text-white">{formatNumber(c.close)}</Td>
+                        <Td align="right" mono className="text-slate-400">{formatNumber(c.volume, 2)}</Td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </TableWrap>
+            )}
+          </AsyncSection>
+        </Card>
+
+        <Card title="Order Book">
+          <AsyncSection state={book}>
+            {(data) => (
+              <div className="p-5 space-y-4">
+                <div>
+                  <div className="text-xs font-medium text-slate-500 uppercase tracking-wider mb-2">Asks</div>
+                  <div className="space-y-1">
+                    {[...data.asks].reverse().map(([price, qty], i) => (
+                      <div key={`ask-${i}`} className="flex justify-between text-xs font-mono">
+                        <span className="text-red-400">{formatNumber(Number(price))}</span>
+                        <span className="text-slate-500">{formatNumber(Number(qty), 4)}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-xs font-medium text-slate-500 uppercase tracking-wider mb-2">Bids</div>
+                  <div className="space-y-1">
+                    {data.bids.map(([price, qty], i) => (
+                      <div key={`bid-${i}`} className="flex justify-between text-xs font-mono">
+                        <span className="text-emerald-400">{formatNumber(Number(price))}</span>
+                        <span className="text-slate-500">{formatNumber(Number(qty), 4)}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
+          </AsyncSection>
+        </Card>
+      </div>
+
+      {symbols.error && (
+        <div className="text-xs text-amber-400">
+          <Badge tone="warning">Symbols unavailable</Badge> {symbols.error}
+        </div>
+      )}
+
+      {pairCoverage && pairCoverage.has_data && pairCoverage.is_stale && (
+        <p className="text-xs text-amber-400">
+          <Badge tone="warning">stale</Badge> Newest {symbol} {timeframe} candle is from{' '}
+          {formatDateTime(pairCoverage.newest)}. The sync job tops this up every 10 minutes.
+        </p>
+      )}
+
+      {coverage.data && coverage.data.pairs_missing > 0 && (
+        <p className="text-xs text-slate-500">
+          {coverage.data.pairs_missing} of {coverage.data.pairs_total} symbol/timeframe pairs have
+          no data yet. A background job is filling them; use Sync market data to start it now.
+        </p>
+      )}
+
+      {sync.error && <p className="text-xs text-red-400">{sync.error}</p>}
+
+      {!streamEnabled && (
+        <p className="text-xs text-slate-600">
+          Live streaming is off. Set <span className="font-mono">MARKET_STREAM_ENABLED=true</span> on
+          the backend to push ticks over the WebSocket gateway instead of polling.
+        </p>
+      )}
+    </div>
+  );
+}
