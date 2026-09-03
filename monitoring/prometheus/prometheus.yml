@@ -1,0 +1,30 @@
+# QuantX — Prometheus scrape configuration.
+#
+# /metrics is authenticated (METRICS_REQUIRE_AUTH, default true), because
+# metrics expose endpoint names, traffic volumes and error rates and are free
+# reconnaissance when left open. Prometheus authenticates with the app's
+# SECRET_KEY, read from a file so the credential never appears in this config
+# or in `docker inspect`.
+#
+# Create the file before starting the stack:
+#   printf '%s' "$SECRET_KEY" > monitoring/prometheus/metrics_password
+#   chmod 600 monitoring/prometheus/metrics_password
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    service: quantx
+
+scrape_configs:
+  - job_name: 'quantx-backend'
+    metrics_path: '/metrics'
+    basic_auth:
+      username: 'prometheus'
+      password_file: /etc/prometheus/metrics_password
+    static_configs:
+      - targets: ['backend:8000']
+
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
