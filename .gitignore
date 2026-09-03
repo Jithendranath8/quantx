@@ -9,19 +9,29 @@ __pycache__/
 *.so
 
 ## Distribution / packaging
+# These are anchored on purpose. An unanchored `lib/` matches a directory of
+# that name at ANY depth, which silently excluded frontend/src/lib and broke
+# the build for anyone cloning the repo. Python only ever writes these under
+# the repo root or backend/, so say exactly that.
 .Python
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
+/build/
+/dist/
+/sdist/
+/wheels/
+/downloads/
+/eggs/
+/.eggs/
+/develop-eggs/
+/parts/
+/var/
+backend/build/
+backend/dist/
+backend/sdist/
+backend/wheels/
+backend/downloads/
+backend/eggs/
+backend/.eggs/
+backend/develop-eggs/
 *.egg-info/
 .installed.cfg
 *.egg
@@ -29,8 +39,10 @@ wheels/
 ## Virtual environments
 .venv
 venv/
-ENV/
-env/
+/ENV/
+/env/
+backend/ENV/
+backend/env/
 
 ## Environment variables
 .env
