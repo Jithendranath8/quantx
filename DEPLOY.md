@@ -98,6 +98,12 @@ returns `{"job": ..., "result": ...}`; a `401` means the secret mismatches, a
   provider configured, else `503`).
 
 ## Caveats & alternatives
+- **Pick the API host's region with Binance in mind.** Binance geo-restricts
+  several regions (notably the US and Singapore). Spot market data is immune —
+  it reads Binance's public mirror (`BINANCE_MARKET_DATA_URL`) — but futures
+  endpoints (funding rate / open interest) have no public mirror and return
+  nulls from a restricted region. On Railway, **EU-West (Amsterdam)** works;
+  the default region may not.
 - **Cost:** Railway is usage-based after the trial credit (~$5/mo Hobby). It does
   not sleep, so the 5-min cron is about keeping data fresh, not keeping the box
   awake. For strictly $0, swap the API layer for **Fly.io** or a **Render** free
