@@ -26,7 +26,7 @@ export function formatNumber(value: number | null | undefined, decimals = 2): st
 
 export function formatPercent(value: number | null | undefined, decimals = 2): string {
   if (value === null || value === undefined || Number.isNaN(value)) return EMPTY;
-  return `${value >= 0 ? '' : ''}${value.toFixed(decimals)}%`;
+  return `${value.toFixed(decimals)}%`;
 }
 
 export function formatSignedPercent(value: number | null | undefined, decimals = 2): string {
