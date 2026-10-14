@@ -89,6 +89,10 @@ class AIDecisionValidator:
                 calculated_position_size_usd=round(max(0.0, calculated_size), 2),
             )
 
+        # The structural check above returns on any missing level, so entry,
+        # stop and target are all present from here on.
+        assert entry is not None and stop_loss is not None and take_profit is not None
+
         # 2. Price sanity: the stop must be on the losing side of entry and the
         #    target on the winning side, for the stated direction.
         if decision.action == "BUY":

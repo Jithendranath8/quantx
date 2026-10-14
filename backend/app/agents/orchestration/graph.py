@@ -25,7 +25,6 @@ OpenAI-compatible model.
 
 from __future__ import annotations
 
-import json
 from itertools import pairwise
 from typing import TYPE_CHECKING, Any, cast
 
@@ -35,6 +34,7 @@ from app.agents.llm.base import ChatMessage, LLMProvider
 from app.agents.llm.runner import AgentRunner
 from app.agents.orchestration.specialists import PIPELINE, RISK_OFFICER, SpecialistSpec
 from app.agents.orchestration.state import OrchestrationState, SpecialistReport
+from app.agents.parsing import parse_agent_decision
 from app.agents.validator import AIDecisionValidator
 from app.core.logging import get_logger
 from app.schemas.agent import AgentDecision
@@ -208,8 +208,7 @@ class QuantXOrchestrator:
 
     def _parse_and_validate(self, text: str, state: OrchestrationState) -> AgentDecision:
         try:
-            payload = json.loads(_strip_code_fences(text))
-            decision = AgentDecision.model_validate(payload)
+            decision = parse_agent_decision(text)
         except Exception as exc:
             logger.warning("synthesis_parse_failed", error=str(exc))
             return AgentDecision(action="WAIT", confidence=0.0, reasoning=f"Unparseable synthesis: {exc}")
@@ -231,13 +230,3 @@ class QuantXOrchestrator:
                 reasoning="Rejected by deterministic validator: " + "; ".join(validation.rejection_reasons),
             )
         return decision
-
-
-def _strip_code_fences(text: str) -> str:
-    """Remove ```json fences a model sometimes wraps JSON in."""
-    s = text.strip()
-    if s.startswith("```"):
-        s = s.split("\n", 1)[-1] if "\n" in s else s
-        if s.endswith("```"):
-            s = s[: -3]
-    return s.strip()

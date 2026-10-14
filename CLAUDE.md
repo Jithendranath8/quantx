@@ -35,8 +35,9 @@ own services, plus an ML price-direction model and an MCP server.
 - `mcp/` — Model Context Protocol server (`python -m app.mcp.server`, `[mcp]`
   extra). Core logic in `handlers.py` is testable without the `mcp` package.
 
-The single-shot advisor (`agents/trading_agent.py`, `services/agent_service.py`)
-still exists; the agentic layer is additive.
+The single-shot advisor (`agents/single_shot.py`, `services/agent_service.py`)
+now runs on the same provider runtime as the multi-agent layer, so it works
+against any configured backend (Anthropic or OpenAI-compatible), not just OpenAI.
 
 ## Running & testing
 - Tests run ONLY against the Docker Postgres/Redis stack. Bring it up with

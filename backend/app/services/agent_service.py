@@ -12,12 +12,15 @@ worse than a WAIT caused by missing data.
 
 import uuid
 from datetime import UTC, datetime
+from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.agents.trading_agent import AgentAnalysis, AITradingAgent
+from app.agents.llm import build_provider
+from app.agents.single_shot import AgentAnalysis, SingleShotAnalyst
 from app.agents.validator import AIDecisionValidator, ValidationResult
+from app.core.config import get_settings
 from app.core.logging import get_logger
 from app.engines.indicators.multi_timeframe import MultiTimeframeEngine
 from app.models.market_data import Candle, FundingRate, OpenInterest
@@ -34,11 +37,22 @@ CONTEXT_TIMEFRAMES = ["15m", "1h", "4h"]
 class AgentService:
     """Service orchestrating context assembly, AI evaluation, and validation."""
 
-    def __init__(self, session: AsyncSession, agent: AITradingAgent | None = None) -> None:
+    def __init__(self, session: AsyncSession, analyst: SingleShotAnalyst | None = None) -> None:
         self._session = session
-        self._agent = agent or AITradingAgent()
+        self._analyst = analyst or self._default_analyst()
         self._mtf_engine = MultiTimeframeEngine(session)
         self._observability = AIObservabilityService(session)
+
+    @staticmethod
+    def _default_analyst() -> SingleShotAnalyst:
+        """Build the analyst over the configured provider, or a disabled one.
+
+        When no provider is configured the analyst has no client and degrades
+        every evaluation to WAIT without attempting a network call.
+        """
+        settings = get_settings()
+        provider = build_provider() if settings.agent_runtime_configured else None
+        return SingleShotAnalyst(provider, base_url=settings.openai_base_url)
 
     async def evaluate_symbol(
         self,
@@ -53,7 +67,7 @@ class AgentService:
         """
         symbol = symbol.upper()
         context = await self.build_context(symbol, user_id)
-        analysis = await self._agent.analyze(context)
+        analysis = await self._analyst.analyze(context)
 
         current_price = self._latest_close(context)
         validation = AIDecisionValidator.validate(
@@ -112,7 +126,7 @@ class AgentService:
 
     # ── Context builders ─────────────────────────────────────────────
 
-    async def _recent_candles(self, symbol: str) -> list[dict]:
+    async def _recent_candles(self, symbol: str) -> list[dict[str, Any]]:
         """Load the most recent 1h candles in chronological order."""
         stmt = (
             select(Candle)
@@ -157,7 +171,7 @@ class AgentService:
         self,
         user_id: uuid.UUID | None,
         symbol: str,
-    ) -> tuple[list[dict], dict]:
+    ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
         """Load the caller's open positions and total exposure."""
         if user_id is None:
             return [], {"total_exposure_usd": 0.0, "symbol_exposure_usd": 0.0}
