@@ -5,8 +5,13 @@ import type { ApiError, Tokens } from './types';
 export const ACCESS_TOKEN_KEY = 'quantx_token';
 export const REFRESH_TOKEN_KEY = 'quantx_refresh_token';
 
+// Default to the same-origin nginx proxy path. For a split deploy (static
+// frontend + separate API host), set VITE_API_BASE_URL at build time to the
+// API's absolute base, e.g. https://quantx-api.onrender.com/api/v1.
+export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? '/api/v1';
+
 const api = axios.create({
-  baseURL: '/api/v1',
+  baseURL: API_BASE_URL,
   headers: { 'Content-Type': 'application/json' },
 });
 
@@ -49,7 +54,7 @@ async function refreshAccessToken(): Promise<string> {
   if (!refreshToken) throw new Error('No refresh token available');
 
   // Bare axios, not `api`: this request must not run the interceptors below.
-  const response = await axios.post<Tokens>('/api/v1/auth/refresh', {
+  const response = await axios.post<Tokens>(`${API_BASE_URL}/auth/refresh`, {
     refresh_token: refreshToken,
   });
   storeTokens(response.data);

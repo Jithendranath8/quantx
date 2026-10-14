@@ -1,0 +1,56 @@
+name: Scheduled jobs
+
+# Free stand-in for an always-on Celery worker: GitHub's scheduler pokes the
+# deployed API's cron endpoint, which runs the same maintenance coroutines the
+# Celery beat schedule would. Requires two repository secrets:
+#   DEPLOY_URL    e.g. https://quantx-api.onrender.com   (no trailing slash)
+#   CRON_SECRET   must equal the backend's CRON_SECRET env var
+#
+# GitHub's minimum cron granularity is 5 minutes, and scheduled runs can lag
+# under load — fine for a portfolio demo. Trigger manually from the Actions tab
+# via "Run workflow".
+
+on:
+  schedule:
+    - cron: "*/5 * * * *" # frequent upkeep
+    - cron: "30 3 * * *" # nightly housekeeping
+  workflow_dispatch: {}
+
+concurrency:
+  group: scheduled-jobs
+  cancel-in-progress: false
+
+jobs:
+  frequent:
+    if: github.event.schedule == '*/5 * * * *' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Run frequent jobs
+        env:
+          DEPLOY_URL: ${{ secrets.DEPLOY_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          set -u
+          for job in paper_fills reconcile market_sync; do
+            echo "→ $job"
+            curl -fsS --max-time 60 -X POST \
+              "$DEPLOY_URL/api/v1/internal/jobs/$job" \
+              -H "X-Cron-Secret: $CRON_SECRET" || echo "warn: $job failed (continuing)"
+          done
+
+  nightly:
+    if: github.event.schedule == '30 3 * * *'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Run nightly jobs
+        env:
+          DEPLOY_URL: ${{ secrets.DEPLOY_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          set -u
+          for job in settle_ai derivatives_snapshot prune cleanup_tokens; do
+            echo "→ $job"
+            curl -fsS --max-time 120 -X POST \
+              "$DEPLOY_URL/api/v1/internal/jobs/$job" \
+              -H "X-Cron-Secret: $CRON_SECRET" || echo "warn: $job failed (continuing)"
+          done

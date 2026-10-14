@@ -58,4 +58,7 @@ ENV BACKEND_WORKERS=4
 
 # --proxy-headers plus a trusted-host list makes X-Forwarded-For usable behind
 # the nginx frontend without letting arbitrary clients spoof their IP.
-CMD ["sh", "-c", "exec uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers ${BACKEND_WORKERS} --loop uvloop --proxy-headers --forwarded-allow-ips='*'"]
+# Bind to $PORT when the platform provides one (Render, Cloud Run, Fly, …);
+# fall back to 8000 for docker-compose. Scale-to-zero free tiers are happiest
+# with a single worker, so BACKEND_WORKERS defaults low and stays configurable.
+CMD ["sh", "-c", "exec uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000} --workers ${BACKEND_WORKERS} --loop uvloop --proxy-headers --forwarded-allow-ips='*'"]

@@ -5,11 +5,34 @@ All configuration is loaded from environment variables via pydantic-settings.
 Never hardcode secrets. Use .env file for local development.
 """
 
+import re
 from functools import lru_cache
 from typing import Literal
 
 from pydantic import Field, computed_field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+_PG_SCHEME = re.compile(r"^postgres(?:ql)?(?:\+\w+)?://")
+
+
+def _to_async_dsn(url: str) -> str:
+    """Normalize a provider DATABASE_URL to an asyncpg DSN.
+
+    Rewrites the scheme to ``postgresql+asyncpg`` and drops libpq-style query
+    params (e.g. ``sslmode=require``) that asyncpg does not accept; asyncpg
+    negotiates TLS automatically against providers that require it.
+    """
+    base = url.split("?", 1)[0]
+    return _PG_SCHEME.sub("postgresql+asyncpg://", base)
+
+
+def _to_sync_dsn(url: str) -> str:
+    """Normalize a provider DATABASE_URL to a sync (psycopg) DSN for Alembic.
+
+    Keeps the query string, so ``sslmode=require`` is preserved for migrations.
+    """
+    return _PG_SCHEME.sub("postgresql://", url)
+
 
 DEFAULT_SECRET_KEY = "change-me-to-a-random-64-char-string"
 DEFAULT_JWT_SECRET_KEY = "change-me-to-a-random-64-char-jwt-secret"
@@ -64,10 +87,17 @@ class Settings(BaseSettings):
     db_pool_recycle_seconds: int = 1800
     db_command_timeout_seconds: int = 30
 
+    # A single DATABASE_URL (as managed providers like Neon/Supabase/Render emit)
+    # overrides the individual POSTGRES_* parts, so the app is deployable on any
+    # PaaS without re-templating the connection components.
+    database_url_override: str = Field(default="", validation_alias="DATABASE_URL")
+
     @computed_field  # type: ignore[prop-decorator]
     @property
     def database_url(self) -> str:
-        """Construct async database URL from individual components."""
+        """Async (asyncpg) database URL; honours a DATABASE_URL override."""
+        if self.database_url_override:
+            return _to_async_dsn(self.database_url_override)
         return (
             f"postgresql+asyncpg://{self.postgres_user}:{self.postgres_password}"
             f"@{self.postgres_host}:{self.postgres_port}/{self.postgres_db}"
@@ -76,7 +106,9 @@ class Settings(BaseSettings):
     @computed_field  # type: ignore[prop-decorator]
     @property
     def database_url_sync(self) -> str:
-        """Construct sync database URL for Alembic migrations."""
+        """Sync database URL for Alembic migrations; honours DATABASE_URL."""
+        if self.database_url_override:
+            return _to_sync_dsn(self.database_url_override)
         return (
             f"postgresql://{self.postgres_user}:{self.postgres_password}"
             f"@{self.postgres_host}:{self.postgres_port}/{self.postgres_db}"
@@ -89,10 +121,16 @@ class Settings(BaseSettings):
     redis_db: int = 0
     redis_max_connections: int = 50
 
+    # A single REDIS_URL (as Upstash/Redis Cloud emit) overrides the parts and,
+    # crucially, allows a TLS scheme (rediss://) that managed Redis requires.
+    redis_url_override: str = Field(default="", validation_alias="REDIS_URL")
+
     @computed_field  # type: ignore[prop-decorator]
     @property
     def redis_url(self) -> str:
-        """Construct Redis URL from individual components."""
+        """Redis URL; honours a REDIS_URL override (supports rediss:// TLS)."""
+        if self.redis_url_override:
+            return self.redis_url_override
         auth = f":{self.redis_password}@" if self.redis_password else ""
         return f"redis://{auth}{self.redis_host}:{self.redis_port}/{self.redis_db}"
 
@@ -220,6 +258,13 @@ class Settings(BaseSettings):
         if isinstance(v, str) and not v.strip():
             return None
         return v
+
+    # ── Scheduled jobs (serverless cron) ─────────────────────────────────
+    # When set, POST /api/v1/internal/jobs/{name} with header X-Cron-Secret runs
+    # a periodic maintenance job. This lets a free external scheduler (e.g. a
+    # GitHub Actions cron) stand in for an always-on Celery worker on a free
+    # deployment. Leave unset to disable the endpoint entirely.
+    cron_secret: str = ""
 
     # ── Celery ───────────────────────────────────────────────────────────
     celery_broker_url: str = "redis://localhost:6379/1"
