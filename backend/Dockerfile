@@ -56,9 +56,15 @@ EXPOSE 8000
 # database pool, so this number multiplies total PostgreSQL connections.
 ENV BACKEND_WORKERS=4
 
+# Apply migrations on startup, then launch the server. Running `alembic upgrade
+# head` here (not only as a platform-specific pre-deploy hook) means the schema
+# is created on any host — some PaaS providers silently skip their pre-deploy
+# step. It is idempotent: a no-op once the DB is already at head. Single replica
+# only; if you scale out, move this back to a dedicated one-shot release step.
+#
 # --proxy-headers plus a trusted-host list makes X-Forwarded-For usable behind
 # the nginx frontend without letting arbitrary clients spoof their IP.
-# Bind to $PORT when the platform provides one (Render, Cloud Run, Fly, …);
+# Bind to $PORT when the platform provides one (Railway, Cloud Run, Fly, …);
 # fall back to 8000 for docker-compose. Scale-to-zero free tiers are happiest
 # with a single worker, so BACKEND_WORKERS defaults low and stays configurable.
-CMD ["sh", "-c", "exec uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000} --workers ${BACKEND_WORKERS} --loop uvloop --proxy-headers --forwarded-allow-ips='*'"]
+CMD ["sh", "-c", "alembic upgrade head && exec uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000} --workers ${BACKEND_WORKERS} --loop uvloop --proxy-headers --forwarded-allow-ips='*'"]

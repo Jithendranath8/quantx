@@ -51,8 +51,8 @@ exposes a secret-gated cron endpoint so no background worker is needed.
    repo. In the service **Settings**:
    - **Root Directory** = `backend` (so the Dockerfile's build context is correct).
    - Railway auto-detects [`backend/railway.json`](backend/railway.json): it builds
-     the Dockerfile, runs `alembic upgrade head` as the pre-deploy step, and
-     health-checks `/health`. No start command needed — the image binds `$PORT`.
+     the Dockerfile and health-checks `/health`. The image applies `alembic upgrade
+     head` on startup and binds `$PORT`, so no start or pre-deploy command is needed.
    Alternatively, headless from the CLI (from the repo root):
    ```bash
    npm i -g @railway/cli        # or: npx @railway/cli
