@@ -14,6 +14,8 @@ O(n^2): ~1000 candles meant ~500,000 row-copies per backtest, all of it on
 whichever thread called ``run``.
 """
 
+from typing import Any
+
 import pandas as pd
 
 from app.engines.backtest.metrics import PerformanceMetricsCalculator
@@ -72,7 +74,7 @@ class BacktestEngine:
 
         capital = self.request.initial_capital
         position: dict[str, float | str] | None = None
-        trades: list[dict] = []
+        trades: list[dict[str, Any]] = []
         equity_curve: list[EquityPoint] = []
         equity_values: list[float] = []
         rolling_max = capital
@@ -183,7 +185,7 @@ class BacktestEngine:
     # ── Position mechanics ───────────────────────────────────────────
 
     @staticmethod
-    def _is_exit_signal(position: dict, action: str) -> bool:
+    def _is_exit_signal(position: dict[str, Any], action: str) -> bool:
         """Whether the signal closes the open position's direction."""
         return (position["side"] == "LONG" and action == "SELL") or (
             position["side"] == "SHORT" and action == "BUY"
@@ -191,7 +193,7 @@ class BacktestEngine:
 
     @staticmethod
     def _check_exit_levels(
-        position: dict,
+        position: dict[str, Any],
         high: float,
         low: float,
     ) -> tuple[float | None, str]:
@@ -225,7 +227,7 @@ class BacktestEngine:
         fee_rate: float,
         slippage: float,
         signal: object,
-    ) -> dict:
+    ) -> dict[str, Any]:
         """Size and open a new position, allocating 95% of free capital."""
         side = "LONG" if action == "BUY" else "SHORT"
         fill_price = price * (1 + slippage) if side == "LONG" else price * (1 - slippage)
@@ -244,13 +246,13 @@ class BacktestEngine:
 
     @staticmethod
     def _close_position(
-        position: dict,
+        position: dict[str, Any],
         exit_price: float,
         timestamp: str,
         capital: float,
         fee_rate: float,
         reason: str,
-    ) -> tuple[float, dict]:
+    ) -> tuple[float, dict[str, Any]]:
         """Realize a position and return the new capital plus the trade record."""
         qty = float(position["qty"])
         entry_price = float(position["entry_price"])
@@ -274,7 +276,7 @@ class BacktestEngine:
         }
 
     @staticmethod
-    def _unrealized(position: dict | None, price: float) -> float:
+    def _unrealized(position: dict[str, Any] | None, price: float) -> float:
         """Mark-to-market value of the open position, or zero when flat."""
         if position is None:
             return 0.0

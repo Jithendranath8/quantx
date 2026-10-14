@@ -74,11 +74,10 @@ async def stream_status(user: CurrentUser) -> dict[str, Any]:
     shared = await read_stream_status()
     if shared is None:
         stream = get_stream_manager()
-        age = stream.metrics.age_seconds
         shared = {
             "status": stream.metrics.connection_status,
             "messages_received": stream.metrics.messages_received,
-            "age_seconds": age,
+            "age_seconds": stream.metrics.age_seconds,
             "candles_persisted": stream.persister.persisted_count,
             "persist_failures": stream.persister.failed_flushes,
         }

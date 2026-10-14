@@ -17,7 +17,7 @@ import asyncio
 import hashlib
 import hmac
 import time
-from typing import Any, Literal, Self
+from typing import Any, Literal, Self, cast
 from urllib.parse import urlencode
 
 import httpx
@@ -260,8 +260,11 @@ class BinanceClient:
     async def get_ticker_24h(self, symbol: str | None = None) -> dict[str, Any] | list[dict[str, Any]]:
         """Fetch 24-hour price change statistics for symbol or all symbols."""
         params = {"symbol": symbol.upper()} if symbol else {}
-        return await self._request(
-            "GET", "/api/v3/ticker/24hr", params=params, base_url=self.market_data_base_url
+        return cast(
+            "dict[str, Any] | list[dict[str, Any]]",
+            await self._request(
+                "GET", "/api/v3/ticker/24hr", params=params, base_url=self.market_data_base_url
+            ),
         )
 
     async def get_price(self, symbol: str) -> float:
@@ -291,11 +294,14 @@ class BinanceClient:
             symbol: Trading pair symbol (e.g. BTCUSDT)
             limit: Depth limit (default 100, max 5000)
         """
-        return await self._request(
-            "GET",
-            "/api/v3/depth",
-            params={"symbol": symbol.upper(), "limit": limit},
-            base_url=self.market_data_base_url,
+        return cast(
+            "dict[str, Any]",
+            await self._request(
+                "GET",
+                "/api/v3/depth",
+                params={"symbol": symbol.upper(), "limit": limit},
+                base_url=self.market_data_base_url,
+            ),
         )
 
     async def get_klines(
@@ -319,17 +325,20 @@ class BinanceClient:
             List of Binance kline arrays: [open_time, open, high, low, close,
             volume, close_time, quote_volume, trades, taker_base, taker_quote, ignore].
         """
-        return await self._request(
-            "GET",
-            "/api/v3/klines",
-            params={
-                "symbol": symbol.upper(),
-                "interval": interval,
-                "limit": limit,
-                "startTime": start_time,
-                "endTime": end_time,
-            },
-            base_url=self.market_data_base_url,
+        return cast(
+            "list[list[Any]]",
+            await self._request(
+                "GET",
+                "/api/v3/klines",
+                params={
+                    "symbol": symbol.upper(),
+                    "interval": interval,
+                    "limit": limit,
+                    "startTime": start_time,
+                    "endTime": end_time,
+                },
+                base_url=self.market_data_base_url,
+            ),
         )
 
     # ── Derivatives market data (FUTURES host, public) ───────────────
@@ -346,34 +355,43 @@ class BinanceClient:
         Funding is published every 8 hours. Returns entries shaped
         ``{"symbol", "fundingRate", "fundingTime"}``.
         """
-        return await self._request(
-            "GET",
-            "/fapi/v1/fundingRate",
-            params={
-                "symbol": symbol.upper(),
-                "startTime": start_time,
-                "endTime": end_time,
-                "limit": min(max(1, limit), 1000),
-            },
-            base_url=self.derivatives_base_url,
+        return cast(
+            "list[dict[str, Any]]",
+            await self._request(
+                "GET",
+                "/fapi/v1/fundingRate",
+                params={
+                    "symbol": symbol.upper(),
+                    "startTime": start_time,
+                    "endTime": end_time,
+                    "limit": min(max(1, limit), 1000),
+                },
+                base_url=self.derivatives_base_url,
+            ),
         )
 
     async def get_premium_index(self, symbol: str) -> dict[str, Any]:
         """Fetch mark price, index price and the current funding rate."""
-        return await self._request(
-            "GET",
-            "/fapi/v1/premiumIndex",
-            params={"symbol": symbol.upper()},
-            base_url=self.derivatives_base_url,
+        return cast(
+            "dict[str, Any]",
+            await self._request(
+                "GET",
+                "/fapi/v1/premiumIndex",
+                params={"symbol": symbol.upper()},
+                base_url=self.derivatives_base_url,
+            ),
         )
 
     async def get_open_interest(self, symbol: str) -> dict[str, Any]:
         """Fetch the current open interest for a perpetual contract."""
-        return await self._request(
-            "GET",
-            "/fapi/v1/openInterest",
-            params={"symbol": symbol.upper()},
-            base_url=self.derivatives_base_url,
+        return cast(
+            "dict[str, Any]",
+            await self._request(
+                "GET",
+                "/fapi/v1/openInterest",
+                params={"symbol": symbol.upper()},
+                base_url=self.derivatives_base_url,
+            ),
         )
 
     async def get_open_interest_history(
@@ -391,22 +409,25 @@ class BinanceClient:
         Args:
             period: One of 5m, 15m, 30m, 1h, 2h, 4h, 6h, 12h, 1d.
         """
-        return await self._request(
-            "GET",
-            "/futures/data/openInterestHist",
-            params={
-                "symbol": symbol.upper(),
-                "period": period,
-                "limit": min(max(1, limit), 500),
-            },
-            base_url=self.derivatives_base_url,
+        return cast(
+            "list[dict[str, Any]]",
+            await self._request(
+                "GET",
+                "/futures/data/openInterestHist",
+                params={
+                    "symbol": symbol.upper(),
+                    "period": period,
+                    "limit": min(max(1, limit), 500),
+                },
+                base_url=self.derivatives_base_url,
+            ),
         )
 
     # ── Signed account endpoints ─────────────────────────────────────
 
     async def get_account(self) -> dict[str, Any]:
         """Fetch account information including balances and permissions."""
-        return await self._request("GET", "/api/v3/account", signed=True)
+        return cast("dict[str, Any]", await self._request("GET", "/api/v3/account", signed=True))
 
     async def get_balances(self) -> dict[str, float]:
         """Return non-zero free balances keyed by asset."""
@@ -425,11 +446,14 @@ class BinanceClient:
 
     async def get_order(self, symbol: str, order_id: int | str) -> dict[str, Any]:
         """Fetch a single order's current state."""
-        return await self._request(
-            "GET",
-            "/api/v3/order",
-            params={"symbol": symbol.upper(), "orderId": order_id},
-            signed=True,
+        return cast(
+            "dict[str, Any]",
+            await self._request(
+                "GET",
+                "/api/v3/order",
+                params={"symbol": symbol.upper(), "orderId": order_id},
+                signed=True,
+            ),
         )
 
     async def place_order(
@@ -523,16 +547,19 @@ class BinanceClient:
             order_id=result.get("orderId"),
             status=result.get("status"),
         )
-        return result
+        return cast("dict[str, Any]", result)
 
     async def cancel_order(self, symbol: str, order_id: int | str) -> dict[str, Any]:
         """Cancel a single open order."""
         self._require_trading_permission("cancel an order")
-        return await self._request(
-            "DELETE",
-            "/api/v3/order",
-            params={"symbol": symbol.upper(), "orderId": order_id},
-            signed=True,
+        return cast(
+            "dict[str, Any]",
+            await self._request(
+                "DELETE",
+                "/api/v3/order",
+                params={"symbol": symbol.upper(), "orderId": order_id},
+                signed=True,
+            ),
         )
 
     async def cancel_all_orders(self, symbol: str) -> list[dict[str, Any]]:

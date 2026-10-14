@@ -46,7 +46,7 @@ class CandlePersister:
         self._session_factory = session_factory
         # Keyed by (symbol, timeframe, open_time) so a repeated close for the
         # same bar collapses instead of queueing twice.
-        self._pending: dict[tuple[str, str, int], dict] = {}
+        self._pending: dict[tuple[str, str, int], dict[str, Any]] = {}
         self._lock = asyncio.Lock()
         self._task: asyncio.Task[None] | None = None
         self._running = False
@@ -72,7 +72,7 @@ class CandlePersister:
         await self.flush()
         logger.info("candle_persister_stopped", persisted=self.persisted_count)
 
-    async def offer(self, event: dict) -> None:
+    async def offer(self, event: dict[str, Any]) -> None:
         """Queue a normalized kline event if it represents a closed bar."""
         if event.get("event_type") != "kline" or not event.get("is_final"):
             return

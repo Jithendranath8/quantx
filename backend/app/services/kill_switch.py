@@ -241,4 +241,4 @@ class KillSwitchService:
             )
             .values(status="CANCELLED_BY_KILL_SWITCH")
         )
-        return result.rowcount or 0
+        return result.rowcount or 0  # type: ignore[attr-defined]  # DML execute returns CursorResult (has rowcount)

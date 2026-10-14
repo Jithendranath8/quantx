@@ -7,6 +7,7 @@ human-readable colored output in development.
 
 import logging
 import sys
+from typing import cast
 
 import structlog
 
@@ -32,6 +33,7 @@ def setup_logging() -> None:
         structlog.processors.UnicodeDecoder(),
     ]
 
+    renderer: structlog.typing.Processor
     if settings.is_production:
         # Production: JSON output
         shared_processors.append(structlog.processors.format_exc_info)
@@ -80,4 +82,4 @@ def get_logger(name: str) -> structlog.stdlib.BoundLogger:
         logger = get_logger(__name__)
         logger.info("processing_trade", symbol="BTCUSDT", action="BUY")
     """
-    return structlog.get_logger(name)
+    return cast("structlog.stdlib.BoundLogger", structlog.get_logger(name))

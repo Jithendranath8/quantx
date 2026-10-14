@@ -12,7 +12,7 @@ from app.workers.runtime import run_async
 
 
 @celery_app.task(name="app.workers.backtest.run_backtest_task", bind=True)
-def run_backtest_task(self, req_dict: dict) -> dict[str, Any]:  # type: ignore[no-untyped-def]
+def run_backtest_task(self, req_dict: dict[str, Any]) -> dict[str, Any]:  # type: ignore[no-untyped-def]
     """Run a backtest in the background and return the serialized result."""
 
     async def _run() -> dict[str, Any]:

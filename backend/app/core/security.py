@@ -15,6 +15,7 @@ written by the previous passlib configuration still verify.
 
 import uuid
 from datetime import UTC, datetime, timedelta
+from typing import Any, cast
 
 import bcrypt
 from jose import JWTError, jwt
@@ -91,7 +92,7 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
 # ── JWT Token Management ─────────────────────────────────────────────
 
 
-def create_access_token(subject: str, extra_claims: dict | None = None) -> str:
+def create_access_token(subject: str, extra_claims: dict[str, Any] | None = None) -> str:
     """Create a JWT access token.
 
     Args:
@@ -114,7 +115,7 @@ def create_access_token(subject: str, extra_claims: dict | None = None) -> str:
         # expiry or token type through extra_claims.
         payload = {**extra_claims, **payload}
 
-    return jwt.encode(payload, settings.jwt_secret_key, algorithm=settings.jwt_algorithm)
+    return str(jwt.encode(payload, settings.jwt_secret_key, algorithm=settings.jwt_algorithm))
 
 
 def create_refresh_token(subject: str) -> str:
@@ -138,10 +139,10 @@ def create_refresh_token(subject: str) -> str:
         "jti": uuid.uuid4().hex,
         "type": "refresh",
     }
-    return jwt.encode(payload, settings.jwt_secret_key, algorithm=settings.jwt_algorithm)
+    return str(jwt.encode(payload, settings.jwt_secret_key, algorithm=settings.jwt_algorithm))
 
 
-def decode_token(token: str) -> dict:
+def decode_token(token: str) -> dict[str, Any]:
     """Decode and validate a JWT token.
 
     Args:
@@ -155,10 +156,13 @@ def decode_token(token: str) -> dict:
         TokenInvalidError: If the token is malformed or invalid.
     """
     try:
-        return jwt.decode(
-            token,
-            settings.jwt_secret_key,
-            algorithms=[settings.jwt_algorithm],
+        return cast(
+            "dict[str, Any]",
+            jwt.decode(
+                token,
+                settings.jwt_secret_key,
+                algorithms=[settings.jwt_algorithm],
+            ),
         )
     except JWTError as e:
         error_msg = str(e).lower()

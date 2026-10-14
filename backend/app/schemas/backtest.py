@@ -5,6 +5,7 @@ Defines input parameters and output performance metrics for backtests.
 """
 
 from datetime import datetime
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -56,4 +57,4 @@ class BacktestResult(BaseModel):
     final_equity: float
     metrics: BacktestMetrics
     equity_curve: list[EquityPoint]
-    trades: list[dict]
+    trades: list[dict[str, Any]]

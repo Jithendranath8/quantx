@@ -6,6 +6,7 @@ via Webhook and Telegram.
 """
 
 import asyncio
+from typing import Any
 
 import httpx
 
@@ -67,7 +68,7 @@ class NotificationService:
         return all(r is True for r in results)
 
     @staticmethod
-    async def _post_webhook(url: str, payload: dict) -> bool:
+    async def _post_webhook(url: str, payload: dict[str, Any]) -> bool:
         """POST the alert payload to the configured webhook."""
         try:
             async with httpx.AsyncClient(timeout=_TIMEOUT) as client:

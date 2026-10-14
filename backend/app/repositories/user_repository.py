@@ -233,7 +233,7 @@ class RefreshTokenRepository:
         )
         result = await self._session.execute(stmt)
         await self._session.flush()
-        return result.rowcount > 0  # type: ignore[union-attr]
+        return bool(result.rowcount > 0)  # type: ignore[attr-defined]  # DML execute returns CursorResult (has rowcount)
 
     async def revoke_all_for_user(self, user_id: uuid.UUID) -> int:
         """Revoke all refresh tokens for a user (logout everywhere).
@@ -254,7 +254,7 @@ class RefreshTokenRepository:
         )
         result = await self._session.execute(stmt)
         await self._session.flush()
-        return result.rowcount  # type: ignore[union-attr]
+        return int(result.rowcount)  # type: ignore[attr-defined]  # DML execute returns CursorResult (has rowcount)
 
     async def cleanup_revoked(self) -> int:
         """Delete all revoked tokens (housekeeping).
@@ -265,7 +265,7 @@ class RefreshTokenRepository:
         stmt = delete(RefreshToken).where(RefreshToken.is_revoked.is_(True))
         result = await self._session.execute(stmt)
         await self._session.flush()
-        return result.rowcount  # type: ignore[union-attr]
+        return int(result.rowcount)  # type: ignore[attr-defined]  # DML execute returns CursorResult (has rowcount)
 
     async def cleanup_expired(self) -> int:
         """Delete tokens whose expiry has passed.
@@ -276,7 +276,7 @@ class RefreshTokenRepository:
         stmt = delete(RefreshToken).where(RefreshToken.expires_at <= datetime.now(UTC))
         result = await self._session.execute(stmt)
         await self._session.flush()
-        return result.rowcount  # type: ignore[union-attr]
+        return int(result.rowcount)  # type: ignore[attr-defined]  # DML execute returns CursorResult (has rowcount)
 
 
 class AuditLogRepository:

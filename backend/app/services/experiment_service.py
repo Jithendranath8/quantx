@@ -16,6 +16,7 @@ import subprocess
 import uuid
 from functools import lru_cache
 from pathlib import Path
+from typing import Any
 
 import pandas as pd
 from sqlalchemy import select
@@ -118,7 +119,7 @@ class ExperimentRegistryService:
     async def register_experiment(
         self,
         strategy_name: str,
-        parameters: dict,
+        parameters: dict[str, Any],
         dataset_version: str,
         symbol: str,
         timeframe: str,
@@ -126,7 +127,7 @@ class ExperimentRegistryService:
         end_date: str,
         fees: float,
         slippage: float,
-        metrics: dict,
+        metrics: dict[str, Any],
         strategy_version: str = "v1.0",
         ai_model: str | None = None,
         dataset_row_count: int | None = None,
@@ -163,8 +164,8 @@ class ExperimentRegistryService:
         df: pd.DataFrame,
         symbol: str,
         timeframe: str,
-        parameters: dict,
-        metrics: dict,
+        parameters: dict[str, Any],
+        metrics: dict[str, Any],
         fees: float,
         slippage: float,
         ai_model: str | None = None,

@@ -39,13 +39,13 @@ class BaseStrategy(ABC):
     lookback: int = 2
 
     @abstractmethod
-    def generate_signal(self, symbol: str, timeframe: str, df_indicators: Any) -> Signal:
+    def generate_signal(self, symbol: str, timeframe: str, df: Any) -> Signal:
         """Evaluate market data and return a trading signal.
 
         Args:
             symbol: Trading symbol (e.g. BTCUSDT)
             timeframe: Timeframe (e.g. 1h)
-            df_indicators: DataFrame containing OHLCV + technical indicators
+            df: DataFrame containing OHLCV + technical indicators
 
         Returns:
             Signal object with action (BUY/SELL/WAIT), confidence, and reasoning.

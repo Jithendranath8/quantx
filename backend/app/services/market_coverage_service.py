@@ -17,6 +17,7 @@ useful.
 import asyncio
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -99,7 +100,7 @@ class CoverageRow:
         """Whether anything is stored at all."""
         return self.candle_count > 0
 
-    def as_dict(self) -> dict:
+    def as_dict(self) -> dict[str, Any]:
         """Serialize for the API."""
         return {
             "symbol": self.symbol,
@@ -190,7 +191,7 @@ class MarketCoverageService:
         symbols: list[str] | None = None,
         timeframes: list[str] | None = None,
         only_missing_or_stale: bool = True,
-    ) -> dict:
+    ) -> dict[str, Any]:
         """Backfill every pair that is missing or has fallen behind.
 
         Args:
@@ -207,7 +208,7 @@ class MarketCoverageService:
         ]
 
         downloader = HistoricalDownloaderService(self._session, client=self._client)
-        results: list[dict] = []
+        results: list[dict[str, Any]] = []
         ingested = 0
         failed = 0
 
@@ -254,7 +255,7 @@ class MarketCoverageService:
             "details": results,
         }
 
-    async def summary(self) -> dict:
+    async def summary(self) -> dict[str, Any]:
         """A one-glance view of coverage completeness."""
         coverage = await self.get_coverage()
         with_data = [c for c in coverage if c.has_data]

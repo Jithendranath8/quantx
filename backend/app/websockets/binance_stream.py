@@ -12,6 +12,7 @@ was dead code.
 import asyncio
 import contextlib
 import json
+from typing import Any, cast
 
 import websockets
 from app.core.config import get_settings
@@ -252,7 +253,7 @@ async def publish_stream_status() -> None:
         await redis.set(STATUS_KEY, json.dumps(payload), ex=STATUS_TTL_SECONDS)
 
 
-async def read_stream_status() -> dict | None:
+async def read_stream_status() -> dict[str, Any] | None:
     """Read the owner-published metrics, or None if no owner is reporting."""
     try:
         redis = await get_redis_client()
@@ -264,7 +265,7 @@ async def read_stream_status() -> dict | None:
     if isinstance(raw, bytes):
         raw = raw.decode()
     with contextlib.suppress(ValueError):
-        return json.loads(raw)
+        return cast("dict[str, Any]", json.loads(raw))
     return None
 
 

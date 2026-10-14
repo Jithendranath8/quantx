@@ -15,11 +15,11 @@ from redis.asyncio.client import PubSub
 from app.core.config import get_settings
 
 # ── Shared pool & client (created lazily, disposed at shutdown) ──────
-_pool: ConnectionPool | None = None
+_pool: ConnectionPool | None = None  # type: ignore[type-arg]  # redis pool generic param unstubbed
 _client: Redis | None = None  # type: ignore[type-arg]
 
 
-def _build_pool() -> ConnectionPool:
+def _build_pool() -> ConnectionPool:  # type: ignore[type-arg]  # redis pool generic param unstubbed
     """Create the Redis connection pool from settings."""
     settings = get_settings()
     return aioredis.ConnectionPool.from_url(
@@ -33,7 +33,7 @@ def _build_pool() -> ConnectionPool:
     )
 
 
-async def get_redis_pool() -> ConnectionPool:
+async def get_redis_pool() -> ConnectionPool:  # type: ignore[type-arg]  # redis pool generic param unstubbed
     """Get or create the Redis connection pool."""
     global _pool
     if _pool is None:
@@ -83,7 +83,7 @@ async def pubsub_context(*patterns: str) -> AsyncGenerator[PubSub]:
                 await pubsub.punsubscribe(*patterns)
         except Exception:
             pass
-        await pubsub.aclose()
+        await pubsub.aclose()  # type: ignore[attr-defined]  # redis-py 5.x async close, stub gap
 
 
 async def close_redis() -> None:
@@ -93,7 +93,7 @@ async def close_redis() -> None:
     """
     global _pool, _client
     if _client is not None:
-        await _client.aclose()
+        await _client.aclose()  # type: ignore[attr-defined]  # redis-py 5.x async close, stub gap
         _client = None
     if _pool is not None:
         await _pool.disconnect()

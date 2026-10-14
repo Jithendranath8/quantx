@@ -19,6 +19,7 @@ import asyncio
 import contextlib
 import os
 import uuid
+from collections.abc import Awaitable, Callable
 
 from app.core.logging import get_logger
 from app.core.redis import get_redis_client
@@ -52,7 +53,12 @@ return 0
 class StreamLeader:
     """Runs ``start``/``stop`` callbacks only while this process owns the lock."""
 
-    def __init__(self, on_acquire, on_release, on_heartbeat=None) -> None:
+    def __init__(
+        self,
+        on_acquire: Callable[[], Awaitable[None]],
+        on_release: Callable[[], Awaitable[None]],
+        on_heartbeat: Callable[[], Awaitable[None]] | None = None,
+    ) -> None:
         self._on_acquire = on_acquire
         self._on_release = on_release
         # Called on each successful renewal so the owner can publish metrics
@@ -62,7 +68,7 @@ class StreamLeader:
         # containers, so pair it with a random token.
         self.token = f"{os.getpid()}:{uuid.uuid4().hex}"
         self.is_leader = False
-        self._task: asyncio.Task | None = None
+        self._task: asyncio.Task[None] | None = None
 
     async def start(self) -> None:
         """Begin campaigning for ownership in the background."""
@@ -88,13 +94,17 @@ class StreamLeader:
 
     async def _renew(self) -> bool:
         redis = await get_redis_client()
-        result = await redis.eval(_RENEW_SCRIPT, 1, LOCK_KEY, self.token, LOCK_TTL_SECONDS)
+        result = await redis.eval(  # type: ignore[no-untyped-call]  # redis-py eval is untyped
+            _RENEW_SCRIPT, 1, LOCK_KEY, self.token, LOCK_TTL_SECONDS
+        )
         return bool(result)
 
     async def _release(self) -> None:
         with contextlib.suppress(Exception):
             redis = await get_redis_client()
-            await redis.eval(_RELEASE_SCRIPT, 1, LOCK_KEY, self.token)
+            await redis.eval(  # type: ignore[no-untyped-call]  # redis-py eval is untyped
+                _RELEASE_SCRIPT, 1, LOCK_KEY, self.token
+            )
 
     async def _run(self) -> None:
         """Campaign forever: acquire, then renew; on loss, stop and re-campaign."""

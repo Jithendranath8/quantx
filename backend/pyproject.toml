@@ -157,13 +157,16 @@ module = [
     "mlflow",
     "mcp.*",
     "pandas",
+    "jose",
+    "celery",
+    "celery.*",
 ]
 ignore_missing_imports = true
 
-# The MCP server wraps an untyped third-party decorator API; relax that one check
-# for this module rather than littering it with per-call ignores.
+# The MCP server and the Celery workers wrap untyped third-party decorator APIs;
+# relax that one check for those modules rather than littering them with per-call ignores.
 [[tool.mypy.overrides]]
-module = ["app.mcp.server"]
+module = ["app.mcp.server", "app.workers.*"]
 disallow_untyped_decorators = false
 
 [tool.pytest.ini_options]

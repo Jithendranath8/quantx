@@ -14,6 +14,7 @@ by name with the gateway's, and had no call sites at all.
 
 import time
 from collections import OrderedDict
+from typing import Any
 
 from pydantic import BaseModel
 
@@ -47,7 +48,7 @@ class MarketDataValidator:
     """Validates real-time market data messages for freshness and sanity."""
 
     @staticmethod
-    def validate_candle(candle_data: dict) -> bool:
+    def validate_candle(candle_data: dict[str, Any]) -> bool:
         """Verify candle fields are present, positive, and internally consistent."""
         try:
             open_p = float(candle_data["open"])
@@ -74,7 +75,7 @@ class MarketDataNormalizer:
     """Normalizes raw Binance streams into a unified QuantX payload."""
 
     @staticmethod
-    def normalize_kline(raw: dict) -> dict:
+    def normalize_kline(raw: dict[str, Any]) -> dict[str, Any]:
         """Convert a Binance kline event into the domain shape.
 
         Carries close_time, quote_volume and trade count as well as OHLCV: a
@@ -101,7 +102,7 @@ class MarketDataNormalizer:
         }
 
     @staticmethod
-    def normalize_trade(raw: dict) -> dict:
+    def normalize_trade(raw: dict[str, Any]) -> dict[str, Any]:
         """Convert a Binance trade event into the domain shape."""
         return {
             "event_type": "trade",
@@ -113,7 +114,7 @@ class MarketDataNormalizer:
         }
 
     @staticmethod
-    def normalize_depth(raw: dict) -> dict:
+    def normalize_depth(raw: dict[str, Any]) -> dict[str, Any]:
         """Convert a Binance depth event into the domain shape."""
         return {
             "event_type": "depth",
@@ -124,7 +125,7 @@ class MarketDataNormalizer:
         }
 
     @classmethod
-    def normalize(cls, raw: dict) -> dict | None:
+    def normalize(cls, raw: dict[str, Any]) -> dict[str, Any] | None:
         """Dispatch on the Binance event shape; None when unrecognized."""
         if "k" in raw:
             return cls.normalize_kline(raw)
@@ -144,11 +145,13 @@ class MarketDataCache:
 
     def __init__(self, max_symbols: int = 256) -> None:
         self._max_symbols = max_symbols
-        self._candles: OrderedDict[str, dict] = OrderedDict()
-        self._trades: OrderedDict[str, dict] = OrderedDict()
-        self._depth: OrderedDict[str, dict] = OrderedDict()
+        self._candles: OrderedDict[str, dict[str, Any]] = OrderedDict()
+        self._trades: OrderedDict[str, dict[str, Any]] = OrderedDict()
+        self._depth: OrderedDict[str, dict[str, Any]] = OrderedDict()
 
-    def _put(self, store: OrderedDict[str, dict], symbol: str, value: dict) -> None:
+    def _put(
+        self, store: OrderedDict[str, dict[str, Any]], symbol: str, value: dict[str, Any]
+    ) -> None:
         """Insert with LRU eviction once the symbol cap is reached."""
         key = symbol.upper()
         store[key] = value
@@ -156,31 +159,31 @@ class MarketDataCache:
         while len(store) > self._max_symbols:
             store.popitem(last=False)
 
-    def update_candle(self, symbol: str, candle: dict) -> None:
+    def update_candle(self, symbol: str, candle: dict[str, Any]) -> None:
         """Store the latest candle for a symbol."""
         self._put(self._candles, symbol, candle)
 
-    def get_candle(self, symbol: str) -> dict | None:
+    def get_candle(self, symbol: str) -> dict[str, Any] | None:
         """Latest candle for a symbol, if cached."""
         return self._candles.get(symbol.upper())
 
-    def update_trade(self, symbol: str, trade: dict) -> None:
+    def update_trade(self, symbol: str, trade: dict[str, Any]) -> None:
         """Store the latest trade for a symbol."""
         self._put(self._trades, symbol, trade)
 
-    def get_trade(self, symbol: str) -> dict | None:
+    def get_trade(self, symbol: str) -> dict[str, Any] | None:
         """Latest trade for a symbol, if cached."""
         return self._trades.get(symbol.upper())
 
-    def update_depth(self, symbol: str, depth: dict) -> None:
+    def update_depth(self, symbol: str, depth: dict[str, Any]) -> None:
         """Store the latest depth snapshot for a symbol."""
         self._put(self._depth, symbol, depth)
 
-    def get_depth(self, symbol: str) -> dict | None:
+    def get_depth(self, symbol: str) -> dict[str, Any] | None:
         """Latest depth snapshot for a symbol, if cached."""
         return self._depth.get(symbol.upper())
 
-    def update(self, event: dict) -> None:
+    def update(self, event: dict[str, Any]) -> None:
         """Route a normalized event into the right store."""
         symbol = event.get("symbol", "")
         if not symbol:
