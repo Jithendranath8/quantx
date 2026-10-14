@@ -7,19 +7,19 @@ that the mutation gate still holds when a tool is reached via MCP. No ``mcp``
 package is required to run these.
 """
 
-from __future__ import annotations
-
 from collections.abc import Awaitable, Callable
-from typing import cast
+from typing import TYPE_CHECKING, cast
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents.tools import build_default_registry
 from app.agents.tools.base import ToolContext
-from app.connectors.binance_client import BinanceClient
 from app.mcp.handlers import handle_call, list_tool_specs
 from app.models.user import User
 from tests.conftest import FakeBinanceClient
+
+if TYPE_CHECKING:
+    from app.connectors.binance_client import BinanceClient
 
 
 def _factory(
@@ -29,7 +29,7 @@ def _factory(
         ctx = ToolContext(
             session=db_session,
             user_id=user.id if user else None,
-            client=cast(BinanceClient, FakeBinanceClient(price=50_000.0)),
+            client=cast("BinanceClient", FakeBinanceClient(price=50_000.0)),
             allow_mutations=allow_mutations,
         )
 

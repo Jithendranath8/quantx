@@ -17,6 +17,8 @@ unseen future bar) is dropped.
 
 from __future__ import annotations
 
+from typing import Any
+
 import numpy as np
 import pandas as pd
 
@@ -32,7 +34,7 @@ FEATURE_COLUMNS: list[str] = [
 ]
 
 
-def build_feature_frame(candles: pd.DataFrame | list[dict]) -> pd.DataFrame:
+def build_feature_frame(candles: pd.DataFrame | list[dict[str, Any]]) -> pd.DataFrame:
     """Compute the feature columns and the next-bar direction label.
 
     Rows with NaNs from warm-up windows (and the final row, whose forward label
@@ -95,7 +97,8 @@ def latest_sequence(df: pd.DataFrame, sequence_length: int = 16) -> np.ndarray:
     if len(features) < sequence_length:
         raise ValueError(f"need >= {sequence_length} feature rows, have {len(features)}")
     window = features[-sequence_length:]
-    return window.reshape(1, sequence_length, len(FEATURE_COLUMNS))
+    reshaped: np.ndarray = window.reshape(1, sequence_length, len(FEATURE_COLUMNS))
+    return reshaped
 
 
 def _rsi(close: pd.Series, period: int) -> pd.Series:

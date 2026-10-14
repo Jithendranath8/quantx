@@ -27,7 +27,7 @@ class _PredictArgs(BaseModel):
     timeframe: str = Field(default="1h")
 
 
-class PredictDirectionTool(Tool):
+class PredictDirectionTool(Tool[_PredictArgs]):
     name = "predict_direction"
     description = (
         "Predict the probability that the next bar closes higher, using the trained ML model "
@@ -37,7 +37,7 @@ class PredictDirectionTool(Tool):
     args_model = _PredictArgs
 
     async def _run(self, args: _PredictArgs, ctx: ToolContext) -> ToolResult:
-        from app.ml.registry import ModelUnavailable
+        from app.ml.registry import ModelUnavailableError
 
         stmt = (
             select(Candle)
@@ -73,7 +73,7 @@ class PredictDirectionTool(Tool):
 
         try:
             prediction = predict_direction(candles, args.symbol.upper(), args.timeframe)
-        except ModelUnavailable as exc:
+        except ModelUnavailableError as exc:
             return self._err(str(exc))
 
         return self._ok(prediction)

@@ -8,23 +8,25 @@ used at training time are read back here, so inference input always matches what
 the model was trained on.
 
 Any missing runtime (torch/tensorflow not installed) or missing artifact raises
-:class:`ModelUnavailable`, which the predict tool turns into a graceful,
+:class:`ModelUnavailableError`, which the predict tool turns into a graceful,
 informative result rather than an error.
 """
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
-import pandas as pd
 
 from app.ml.dataset import build_feature_frame, latest_sequence
-from app.ml.registry import ModelUnavailable, artifact_paths, latest_metadata
+from app.ml.registry import ModelUnavailableError, artifact_paths, latest_metadata
+
+if TYPE_CHECKING:
+    import pandas as pd
 
 
 def predict_direction(
-    candles: pd.DataFrame | list[dict],
+    candles: pd.DataFrame | list[dict[str, Any]],
     symbol: str,
     timeframe: str,
     prefer: str = "torch",
@@ -32,7 +34,7 @@ def predict_direction(
     """Score the most recent window and return a direction prediction."""
     meta = latest_metadata(symbol, timeframe, prefer)
     if meta is None:
-        raise ModelUnavailable(
+        raise ModelUnavailableError(
             f"No trained model for {symbol.upper()} {timeframe}. Train one with scripts/train_model.sh."
         )
 
@@ -50,7 +52,7 @@ def predict_direction(
     elif backend == "tensorflow":
         prob = _tf_predict(symbol, timeframe, seq)
     else:
-        raise ModelUnavailable(f"Unknown model backend {backend!r}")
+        raise ModelUnavailableError(f"Unknown model backend {backend!r}")
 
     metrics = meta.get("metrics", {})
     return {
@@ -73,14 +75,16 @@ def _torch_predict(meta: dict[str, Any], symbol: str, timeframe: str, seq: np.nd
 
         from app.ml.models.torch_model import build_model
     except ImportError as exc:  # pragma: no cover - exercised only without torch
-        raise ModelUnavailable("PyTorch is not installed; install the 'ml' extra.") from exc
+        raise ModelUnavailableError("PyTorch is not installed; install the 'ml' extra.") from exc
 
     weights_path, _ = artifact_paths(symbol, timeframe, "torch")
     if not weights_path.exists():
-        raise ModelUnavailable(f"Model weights missing at {weights_path}")
+        raise ModelUnavailableError(f"Model weights missing at {weights_path}")
 
     model = build_model(n_features=int(meta["n_features"]), hidden_size=int(meta.get("hidden", 32)))
-    model.load_state_dict(torch.load(weights_path, map_location="cpu"))
+    # weights_only=True restricts unpickling to tensors, closing the arbitrary-
+    # code-execution path that torch.load otherwise opens on an untrusted file.
+    model.load_state_dict(torch.load(weights_path, map_location="cpu", weights_only=True))
     model.eval()
     with torch.no_grad():
         return float(model(torch.from_numpy(seq)).item())
@@ -90,10 +94,10 @@ def _tf_predict(symbol: str, timeframe: str, seq: np.ndarray) -> float:
     try:
         import tensorflow as tf
     except ImportError as exc:  # pragma: no cover - exercised only without tensorflow
-        raise ModelUnavailable("TensorFlow is not installed; install the 'ml' extra.") from exc
+        raise ModelUnavailableError("TensorFlow is not installed; install the 'ml' extra.") from exc
 
     weights_path, _ = artifact_paths(symbol, timeframe, "tensorflow")
     if not weights_path.exists():
-        raise ModelUnavailable(f"Model artifact missing at {weights_path}")
+        raise ModelUnavailableError(f"Model artifact missing at {weights_path}")
     model = tf.keras.models.load_model(weights_path)
     return float(model.predict(seq, verbose=0).reshape(-1)[0])

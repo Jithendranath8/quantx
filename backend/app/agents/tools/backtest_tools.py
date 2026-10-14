@@ -20,7 +20,7 @@ class _NoArgs(BaseModel):
     pass
 
 
-class ListStrategiesTool(Tool):
+class ListStrategiesTool(Tool[_NoArgs]):
     name = "list_strategies"
     description = "List the available trading strategies and their tunable parameters."
     args_model = _NoArgs
@@ -37,7 +37,7 @@ class _BacktestArgs(BaseModel):
     initial_capital: float = Field(default=10_000.0, ge=100.0)
 
 
-class RunBacktestTool(Tool):
+class RunBacktestTool(Tool[_BacktestArgs]):
     name = "run_backtest"
     description = (
         "Run an event-driven backtest of a strategy over stored candles and return "

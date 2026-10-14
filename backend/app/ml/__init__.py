@@ -11,13 +11,13 @@ runtime it will not use.
 from __future__ import annotations
 
 from app.ml.dataset import FEATURE_COLUMNS, build_feature_frame, build_sequences, latest_sequence
-from app.ml.registry import ModelUnavailable, latest_metadata
+from app.ml.registry import ModelUnavailableError, latest_metadata
 
 __all__ = [
     "FEATURE_COLUMNS",
+    "ModelUnavailableError",
     "build_feature_frame",
     "build_sequences",
-    "latest_sequence",
-    "ModelUnavailable",
     "latest_metadata",
+    "latest_sequence",
 ]

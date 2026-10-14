@@ -28,7 +28,7 @@ class _ValidateTradeArgs(BaseModel):
     current_exposure_usd: float = Field(default=0.0, ge=0.0)
 
 
-class ValidateTradeTool(Tool):
+class ValidateTradeTool(Tool[_ValidateTradeArgs]):
     name = "validate_trade"
     description = (
         "Check a proposed trade against the deterministic risk engine (per-trade risk, "
@@ -67,7 +67,7 @@ class _RiskStateArgs(BaseModel):
     pass
 
 
-class GetRiskStateTool(Tool):
+class GetRiskStateTool(Tool[_RiskStateArgs]):
     name = "get_risk_state"
     description = "Read the authenticated user's persisted risk state: halt status and daily loss."
     args_model = _RiskStateArgs

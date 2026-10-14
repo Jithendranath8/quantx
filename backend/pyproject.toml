@@ -147,6 +147,25 @@ warn_return_any = true
 warn_unused_configs = true
 plugins = ["pydantic.mypy"]
 
+# Optional / unstubbed third-party modules. The ML and MCP runtimes are optional
+# extras (not installed in the core image), and pandas ships no stubs by default,
+# so treat their imports as untyped rather than failing the type check.
+[[tool.mypy.overrides]]
+module = [
+    "torch.*",
+    "tensorflow.*",
+    "mlflow",
+    "mcp.*",
+    "pandas",
+]
+ignore_missing_imports = true
+
+# The MCP server wraps an untyped third-party decorator API; relax that one check
+# for this module rather than littering it with per-call ignores.
+[[tool.mypy.overrides]]
+module = ["app.mcp.server"]
+disallow_untyped_decorators = false
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"

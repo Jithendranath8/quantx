@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from pathlib import Path
 from typing import Any
 
@@ -28,8 +29,12 @@ logger = get_logger(__name__)
 
 EXPERIMENT_NAME = "quantx-direction"
 
+# Anything outside this set is stripped from user-supplied artifact-name parts,
+# so a crafted symbol/timeframe cannot traverse out of the model directory.
+_SAFE_COMPONENT = re.compile(r"[^A-Za-z0-9]")
 
-class ModelUnavailable(RuntimeError):
+
+class ModelUnavailableError(RuntimeError):
     """Raised when a requested model artifact or its runtime is not available."""
 
 
@@ -40,7 +45,16 @@ def model_dir() -> Path:
 
 
 def artifact_stem(symbol: str, timeframe: str, backend: str) -> str:
-    return f"{symbol.upper()}_{timeframe}_{backend}"
+    """Build a filesystem-safe artifact stem.
+
+    ``symbol``/``timeframe`` originate from user input, so every component is
+    stripped to alphanumerics. Without this a value like ``../../etc`` would let
+    a model path escape ``ml_model_dir`` (path traversal).
+    """
+    safe_symbol = _SAFE_COMPONENT.sub("", symbol.upper())
+    safe_timeframe = _SAFE_COMPONENT.sub("", timeframe)
+    safe_backend = _SAFE_COMPONENT.sub("", backend)
+    return f"{safe_symbol}_{safe_timeframe}_{safe_backend}"
 
 
 def artifact_paths(symbol: str, timeframe: str, backend: str) -> tuple[Path, Path]:
@@ -59,7 +73,8 @@ def load_metadata(meta_path: Path) -> dict[str, Any] | None:
     if not meta_path.exists():
         return None
     try:
-        return json.loads(meta_path.read_text())
+        data: dict[str, Any] = json.loads(meta_path.read_text())
+        return data
     except json.JSONDecodeError:
         logger.warning("model_metadata_unreadable", path=str(meta_path))
         return None
@@ -107,7 +122,7 @@ def log_run(
             for artifact in artifacts or []:
                 if os.path.exists(artifact):
                     mlflow.log_artifact(artifact)
-            return run.info.run_id
-    except Exception as exc:  # noqa: BLE001 — tracking must not break training
+            return str(run.info.run_id)
+    except Exception as exc:
         logger.warning("mlflow_logging_failed", error=str(exc))
         return None

@@ -8,12 +8,16 @@ optional paper-execution step gated on mutations being enabled.
 
 from __future__ import annotations
 
-from app.agents.llm.base import LLMProvider
+from typing import TYPE_CHECKING
+
 from app.agents.orchestration.graph import QuantXOrchestrator
 from app.agents.orchestration.state import OrchestrationState, SpecialistReport
 from app.agents.tools import build_default_registry
-from app.agents.tools.base import ToolContext
-from app.agents.tools.registry import ToolRegistry
+
+if TYPE_CHECKING:
+    from app.agents.llm.base import LLMProvider
+    from app.agents.tools.base import ToolContext
+    from app.agents.tools.registry import ToolRegistry
 
 
 def build_orchestrator(
@@ -26,8 +30,8 @@ def build_orchestrator(
 
 
 __all__ = [
-    "QuantXOrchestrator",
     "OrchestrationState",
+    "QuantXOrchestrator",
     "SpecialistReport",
     "build_orchestrator",
 ]

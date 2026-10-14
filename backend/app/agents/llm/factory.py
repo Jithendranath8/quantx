@@ -9,8 +9,12 @@ by intent, not by import.
 
 from __future__ import annotations
 
-from app.agents.llm.base import LLMProvider
+from typing import TYPE_CHECKING
+
 from app.core.config import get_settings
+
+if TYPE_CHECKING:
+    from app.agents.llm.base import LLMProvider
 
 
 def build_provider(name: str | None = None) -> LLMProvider:

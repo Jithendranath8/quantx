@@ -25,26 +25,26 @@ logger = get_logger(__name__)
 class ToolRegistry:
     """An ordered, name-indexed collection of :class:`Tool` instances."""
 
-    def __init__(self, tools: list[Tool] | None = None) -> None:
-        self._tools: dict[str, Tool] = {}
+    def __init__(self, tools: list[Tool[Any]] | None = None) -> None:
+        self._tools: dict[str, Tool[Any]] = {}
         for tool in tools or []:
             self.register(tool)
 
-    def register(self, tool: Tool) -> None:
+    def register(self, tool: Tool[Any]) -> None:
         if tool.name in self._tools:
             raise ValueError(f"Duplicate tool name: {tool.name!r}")
         self._tools[tool.name] = tool
 
-    def get(self, name: str) -> Tool | None:
+    def get(self, name: str) -> Tool[Any] | None:
         return self._tools.get(name)
 
     def names(self) -> list[str]:
         return list(self._tools)
 
-    def all(self) -> list[Tool]:
+    def all(self) -> list[Tool[Any]]:
         return list(self._tools.values())
 
-    def subset(self, names: list[str]) -> "ToolRegistry":
+    def subset(self, names: list[str]) -> ToolRegistry:
         """Return a new registry with only the named tools (preserving order).
 
         Used by the orchestration layer to give each specialist agent exactly

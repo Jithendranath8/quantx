@@ -8,8 +8,6 @@ Three layers:
   * the predict agent tool's graceful degradation when no model is trained.
 """
 
-from __future__ import annotations
-
 from pathlib import Path
 from typing import cast
 
@@ -128,4 +126,17 @@ async def test_predict_tool_reports_missing_model(
     # Either torch is absent or there is simply no trained model; both are
     # reported as a clean message, never an exception.
     assert isinstance(result.error, str) and result.error
-    _ = cast(str, result.error)
+    _ = cast("str", result.error)
+
+
+# ── security: artifact path sanitization ──────────────────────────────
+
+
+def test_artifact_stem_strips_path_traversal() -> None:
+    """User-supplied symbol/timeframe must never escape the model directory."""
+    from app.ml.registry import artifact_stem
+
+    stem = artifact_stem("../../etc/passwd", "1h/../x", "torch")
+    assert "/" not in stem
+    assert ".." not in stem
+    assert stem == "ETCPASSWD_1hx_torch"

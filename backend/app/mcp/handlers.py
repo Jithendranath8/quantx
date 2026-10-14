@@ -14,10 +14,12 @@ start-up, so a remote MCP client can never escalate its own privileges.
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from app.agents.tools.base import ToolContext
-from app.agents.tools.registry import ToolRegistry
+
+if TYPE_CHECKING:
+    from app.agents.tools.registry import ToolRegistry
 
 CtxFactory = Callable[[], Awaitable[tuple[ToolContext, Callable[[], Awaitable[None]]]]]
 

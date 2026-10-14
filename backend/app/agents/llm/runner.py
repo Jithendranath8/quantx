@@ -18,15 +18,17 @@ ceiling (``agent_max_tool_iterations``) guarantees termination and bounds cost.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, Field
 
 from app.agents.llm.base import ChatMessage, LLMProvider, ToolCall
-from app.agents.tools.base import ToolContext
-from app.agents.tools.registry import ToolRegistry
 from app.core.config import get_settings
 from app.core.logging import get_logger
+
+if TYPE_CHECKING:
+    from app.agents.tools.base import ToolContext
+    from app.agents.tools.registry import ToolRegistry
 
 logger = get_logger(__name__)
 
@@ -126,7 +128,7 @@ class AgentRunner:
         # Iteration ceiling reached: ask once more for a final answer with no tools.
         logger.warning("agent_hit_iteration_ceiling", iterations=self._max_iterations)
         final = await self._provider.chat(
-            messages + [ChatMessage(role="user", content="Provide your final answer now without calling tools.")],
+            [*messages, ChatMessage(role="user", content="Provide your final answer now without calling tools.")],
             tools=None,
             temperature=self._temperature,
             max_tokens=self._max_tokens,

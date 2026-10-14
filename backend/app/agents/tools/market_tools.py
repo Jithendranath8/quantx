@@ -21,7 +21,7 @@ class _SymbolArgs(BaseModel):
     symbol: str = Field(..., min_length=3, max_length=20, description="Trading pair, e.g. BTCUSDT")
 
 
-class GetPriceTool(Tool):
+class GetPriceTool(Tool[_SymbolArgs]):
     name = "get_price"
     description = "Get the current live market price for a trading symbol from the exchange."
     args_model = _SymbolArgs
@@ -39,7 +39,7 @@ class _KlinesArgs(BaseModel):
     limit: int = Field(default=50, ge=1, le=500, description="Number of most-recent candles")
 
 
-class GetKlinesTool(Tool):
+class GetKlinesTool(Tool[_KlinesArgs]):
     name = "get_klines"
     description = (
         "Get the most recent stored OHLCV candles for a symbol and timeframe, "
@@ -83,7 +83,7 @@ class _IndicatorArgs(BaseModel):
     )
 
 
-class GetIndicatorsTool(Tool):
+class GetIndicatorsTool(Tool[_IndicatorArgs]):
     name = "get_indicators"
     description = (
         "Compute a multi-timeframe technical-indicator snapshot (SMA, EMA, RSI, MACD, "

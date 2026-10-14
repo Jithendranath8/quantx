@@ -8,21 +8,21 @@ deterministic validator downgrade to WAIT, the mutation-gated execution step,
 and that a valid actionable decision with mutations enabled places a paper order.
 """
 
-from __future__ import annotations
-
 import json
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents.llm.base import ChatMessage, LLMProvider, LLMResponse
 from app.agents.orchestration import build_orchestrator
 from app.agents.tools.base import ToolContext
-from app.connectors.binance_client import BinanceClient
 from app.models.user import User
 from app.schemas.paper_trading import CreatePaperAccountRequest
 from app.services.paper_trading_service import PaperTradingService
 from tests.conftest import FakeBinanceClient
+
+if TYPE_CHECKING:
+    from app.connectors.binance_client import BinanceClient
 
 VALID_BUY = {
     "action": "BUY",
@@ -71,7 +71,7 @@ def _ctx(db_session: AsyncSession, user: User, *, allow_mutations: bool) -> Tool
     return ToolContext(
         session=db_session,
         user_id=user.id,
-        client=cast(BinanceClient, FakeBinanceClient(price=50_000.0)),
+        client=cast("BinanceClient", FakeBinanceClient(price=50_000.0)),
         account_balance=100_000.0,
         allow_mutations=allow_mutations,
     )

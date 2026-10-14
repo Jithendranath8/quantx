@@ -29,16 +29,20 @@ Two invariants make this safe to hand to a model:
 from __future__ import annotations
 
 import time
-import uuid
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Any, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar
 
 from pydantic import BaseModel, ValidationError
 
-from app.connectors.binance_client import BinanceClient
 from app.core.logging import get_logger
-from sqlalchemy.ext.asyncio import AsyncSession
+
+if TYPE_CHECKING:
+    import uuid
+
+    from sqlalchemy.ext.asyncio import AsyncSession
+
+    from app.connectors.binance_client import BinanceClient
 
 logger = get_logger(__name__)
 
@@ -85,17 +89,21 @@ class ToolResult(BaseModel):
         return json.dumps(payload, default=str, separators=(",", ":"))
 
 
-class Tool(ABC):
-    """Base class for an agent tool.
+class Tool[ArgsT: BaseModel](ABC):
+    """Base class for an agent tool, generic over its argument model.
 
-    Subclasses declare ``name``, ``description`` and an ``args_model`` (a
-    Pydantic model describing the accepted arguments), then implement
-    :meth:`_run`. Argument validation, timing and error capture are handled here.
+    Subclasses parameterize the generic with their Pydantic argument model —
+    ``class GetPriceTool(Tool[_SymbolArgs])`` — declare ``name``, ``description``
+    and ``args_model``, then implement :meth:`_run`. Making the base generic
+    keeps :meth:`_run` type-safe per tool (no Liskov violation from narrowing
+    the argument type). Argument validation, timing and error capture are
+    handled here, so every tool inherits identical safety behaviour.
     """
 
     name: ClassVar[str]
     description: ClassVar[str]
-    args_model: ClassVar[type[BaseModel]]
+    #: The Pydantic model raw arguments are validated against.
+    args_model: type[ArgsT]
     #: True when the tool can change persistent or exchange state.
     mutating: ClassVar[bool] = False
 
@@ -126,7 +134,7 @@ class Tool(ABC):
 
         try:
             result = await self._run(args, ctx)
-        except Exception as exc:  # noqa: BLE001 — a tool must never abort the agent loop
+        except Exception as exc:
             logger.error("tool_execution_failed", tool=self.name, error=str(exc))
             return self._err(f"{type(exc).__name__}: {exc}", started)
 
@@ -134,7 +142,7 @@ class Tool(ABC):
         return result
 
     @abstractmethod
-    async def _run(self, args: BaseModel, ctx: ToolContext) -> ToolResult:
+    async def _run(self, args: ArgsT, ctx: ToolContext) -> ToolResult:
         """Execute the tool. ``args`` is the validated ``args_model`` instance."""
 
     # ── helpers for subclasses ───────────────────────────────────────

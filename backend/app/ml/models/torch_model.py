@@ -17,7 +17,7 @@ import torch
 from torch import nn
 
 
-class DirectionLSTM(nn.Module):
+class DirectionLSTM(nn.Module):  # type: ignore[misc]  # torch is an optional, unstubbed dependency
     """LSTM → dropout → linear → sigmoid, emitting P(next bar up)."""
 
     def __init__(self, n_features: int, hidden_size: int = 32, num_layers: int = 1, dropout: float = 0.1) -> None:

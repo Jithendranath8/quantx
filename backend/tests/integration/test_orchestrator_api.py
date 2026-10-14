@@ -6,8 +6,6 @@ provider and Binance client replaced by fakes so no network is touched. Covers
 the happy path, the "no provider configured" guard, and auth.
 """
 
-from __future__ import annotations
-
 import json
 from typing import Any
 
@@ -15,7 +13,7 @@ import pytest
 from httpx import AsyncClient
 
 import app.api.v1.endpoints.orchestrator as orch_endpoint
-from app.agents.llm.base import ChatMessage, LLMProvider, LLMResponse
+from app.agents.llm.base import LLMProvider, LLMResponse
 from tests.conftest import FakeBinanceClient
 
 VALID_BUY = {

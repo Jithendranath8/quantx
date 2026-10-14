@@ -15,14 +15,16 @@ from __future__ import annotations
 
 import subprocess
 from datetime import UTC, datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
-import pandas as pd
 
 from app.core.logging import get_logger
 from app.ml.dataset import FEATURE_COLUMNS, build_sequences
 from app.ml.registry import artifact_paths, log_run, save_metadata
+
+if TYPE_CHECKING:
+    import pandas as pd
 
 logger = get_logger(__name__)
 
@@ -150,7 +152,9 @@ def _prepare(df: pd.DataFrame, sequence_length: int) -> tuple[np.ndarray, np.nda
     return x, y, scaler
 
 
-def _time_split(x: np.ndarray, y: np.ndarray, val_frac: float = 0.2):
+def _time_split(
+    x: np.ndarray, y: np.ndarray, val_frac: float = 0.2
+) -> tuple[tuple[np.ndarray, np.ndarray], tuple[np.ndarray, np.ndarray]]:
     """Time-ordered split: earliest for train, most recent for validation."""
     n_val = max(1, int(len(x) * val_frac))
     split = len(x) - n_val
@@ -209,7 +213,7 @@ def _metadata(
         "hidden": hidden,
         "scaler": scaler,
         "metrics": metrics,
-        "n_samples": int(len(x)),
+        "n_samples": len(x),
         "trained_at": datetime.now(UTC).isoformat(),
         "model_version": datetime.now(UTC).strftime("%Y%m%d%H%M%S"),
         "git_commit": _git_commit(),
@@ -219,5 +223,5 @@ def _metadata(
 def _git_commit() -> str | None:
     try:
         return subprocess.check_output(["git", "rev-parse", "HEAD"], stderr=subprocess.DEVNULL).decode().strip()
-    except Exception:  # noqa: BLE001 — provenance is best-effort
+    except Exception:
         return None

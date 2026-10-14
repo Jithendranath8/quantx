@@ -17,11 +17,12 @@ from app.agents.tools.registry import ToolRegistry
 from app.connectors.binance_client import BinanceClient
 from app.models.user import User
 from tests.conftest import FakeBinanceClient
+
 # asyncio_mode=auto (pyproject) runs async tests without an explicit mark.
 
 
 def _fake_client() -> BinanceClient:
-    return cast(BinanceClient, FakeBinanceClient())
+    return cast("BinanceClient", FakeBinanceClient())
 
 
 def _registry() -> ToolRegistry:
@@ -79,7 +80,7 @@ async def test_mutation_gate_blocks_orders_by_default(db_session: AsyncSession, 
 
 
 async def test_get_price_uses_exchange_client(db_session: AsyncSession) -> None:
-    ctx = ToolContext(session=db_session, client=cast(BinanceClient, FakeBinanceClient(price=50_000.0)))
+    ctx = ToolContext(session=db_session, client=cast("BinanceClient", FakeBinanceClient(price=50_000.0)))
     result = await _registry().invoke("get_price", {"symbol": "BTCUSDT"}, ctx)
     assert result.ok is True
     assert isinstance(result.data, dict)

@@ -26,7 +26,8 @@ OpenAI-compatible model.
 from __future__ import annotations
 
 import json
-from typing import Any
+from itertools import pairwise
+from typing import TYPE_CHECKING, Any, cast
 
 from langgraph.graph import END, START, StateGraph
 
@@ -34,13 +35,23 @@ from app.agents.llm.base import ChatMessage, LLMProvider
 from app.agents.llm.runner import AgentRunner
 from app.agents.orchestration.specialists import PIPELINE, RISK_OFFICER, SpecialistSpec
 from app.agents.orchestration.state import OrchestrationState, SpecialistReport
-from app.agents.tools.base import ToolContext
-from app.agents.tools.registry import ToolRegistry
 from app.agents.validator import AIDecisionValidator
 from app.core.logging import get_logger
 from app.schemas.agent import AgentDecision
 
+if TYPE_CHECKING:
+    from collections.abc import Awaitable, Callable
+
+    from app.agents.tools.base import ToolContext
+    from app.agents.tools.registry import ToolRegistry
+
 logger = get_logger(__name__)
+
+# A minimal fixed quantity for the demonstration paper order placed when the
+# pipeline reaches the (mutations-enabled) execution step. Real position sizing
+# is the risk engine's responsibility, enforced inside the submit_paper_order
+# tool; this is only a token amount to exercise the execution path end to end.
+DEMO_PAPER_ORDER_QUANTITY = 0.001
 
 SYNTHESIS_SYSTEM_PROMPT = (
     "You are the lead portfolio strategist for QuantX. You are given reports from a market "
@@ -74,16 +85,18 @@ class QuantXOrchestrator:
     # ── graph construction ───────────────────────────────────────────
 
     def _build(self) -> Any:
-        builder: StateGraph = StateGraph(OrchestrationState)
+        builder = StateGraph(OrchestrationState)
         builder.add_node("init", self._init_node)
         for spec in PIPELINE:
-            builder.add_node(spec.key, self._make_specialist_node(spec))
+            # The typed async node is a valid LangGraph node; its strict node
+            # overloads don't accept our precise signature, so cast at the edge.
+            builder.add_node(spec.key, cast("Any", self._make_specialist_node(spec)))
         builder.add_node("synthesis", self._synthesis_node)
         builder.add_node("execution", self._execution_node)
 
         builder.add_edge(START, "init")
         builder.add_edge("init", PIPELINE[0].key)
-        for earlier, later in zip(PIPELINE, PIPELINE[1:], strict=False):
+        for earlier, later in pairwise(PIPELINE):
             builder.add_edge(earlier.key, later.key)
         builder.add_edge(PIPELINE[-1].key, "synthesis")
         builder.add_conditional_edges(
@@ -105,10 +118,14 @@ class QuantXOrchestrator:
         price: float | None = None
         result = await self._registry.invoke("get_price", {"symbol": state.symbol}, self._ctx)
         if result.ok and isinstance(result.data, dict):
-            price = float(result.data.get("price")) if result.data.get("price") is not None else None
+            raw_price = result.data.get("price")
+            if raw_price is not None:
+                price = float(raw_price)
         return {"market_price": price, "log": [*state.log, f"init: price={price}"]}
 
-    def _make_specialist_node(self, spec: SpecialistSpec):
+    def _make_specialist_node(
+        self, spec: SpecialistSpec
+    ) -> Callable[[OrchestrationState], Awaitable[dict[str, Any]]]:
         async def _node(state: OrchestrationState) -> dict[str, Any]:
             report = await self._run_specialist(spec, state)
             updates: dict[str, Any] = {
@@ -161,12 +178,9 @@ class QuantXOrchestrator:
     async def _execution_node(self, state: OrchestrationState) -> dict[str, Any]:
         decision = state.final_decision or {}
         side = decision.get("action")
-        # Minimal, fixed notional for the demonstration paper order; sizing is
-        # the risk engine's job, enforced inside the tool call.
-        qty = 0.001
         result = await self._registry.invoke(
             "submit_paper_order",
-            {"symbol": state.symbol, "side": side, "quantity": qty},
+            {"symbol": state.symbol, "side": side, "quantity": DEMO_PAPER_ORDER_QUANTITY},
             self._ctx,
         )
         order = result.data if (result.ok and isinstance(result.data, dict)) else {"error": result.error}
@@ -196,7 +210,7 @@ class QuantXOrchestrator:
         try:
             payload = json.loads(_strip_code_fences(text))
             decision = AgentDecision.model_validate(payload)
-        except Exception as exc:  # noqa: BLE001 — malformed synthesis must degrade to WAIT
+        except Exception as exc:
             logger.warning("synthesis_parse_failed", error=str(exc))
             return AgentDecision(action="WAIT", confidence=0.0, reasoning=f"Unparseable synthesis: {exc}")
 

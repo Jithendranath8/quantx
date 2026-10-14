@@ -7,12 +7,10 @@ tested deterministically without any network call. Also covers the Anthropic
 message translation, the OpenAI message mapping, and the provider factory.
 """
 
-from __future__ import annotations
-
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 import pytest
-from sqlalchemy.ext.asyncio import AsyncSession
+from pydantic import BaseModel
 
 from app.agents.llm.anthropic_provider import AnthropicProvider
 from app.agents.llm.base import ChatMessage, LLMProvider, LLMResponse, LLMUsage, ToolCall
@@ -22,8 +20,9 @@ from app.agents.llm.runner import AgentRunner
 from app.agents.tools.base import Tool, ToolContext, ToolResult
 from app.agents.tools.registry import ToolRegistry
 from app.core.config import Settings
-from pydantic import BaseModel
 
+if TYPE_CHECKING:
+    from sqlalchemy.ext.asyncio import AsyncSession
 
 # ── test doubles ─────────────────────────────────────────────────────
 
@@ -32,12 +31,12 @@ class _EchoArgs(BaseModel):
     text: str
 
 
-class EchoTool(Tool):
+class EchoTool(Tool[_EchoArgs]):
     name = "echo"
     description = "Echo the given text back."
     args_model = _EchoArgs
 
-    async def _run(self, args: _EchoArgs, ctx: ToolContext) -> ToolResult:  # type: ignore[override]
+    async def _run(self, args: _EchoArgs, ctx: ToolContext) -> ToolResult:
         return self._ok({"echo": args.text})
 
 
@@ -75,7 +74,7 @@ class ScriptedProvider(LLMProvider):
 
 def _ctx() -> ToolContext:
     # The echo tool never touches the session, so a placeholder is fine here.
-    return ToolContext(session=cast(AsyncSession, None))
+    return ToolContext(session=cast("AsyncSession", None))
 
 
 def _registry() -> ToolRegistry:

@@ -12,7 +12,10 @@ constructed with ``allow_mutations=True``.
 
 from __future__ import annotations
 
-from pydantic import BaseModel, Field
+import uuid
+from typing import Literal
+
+from pydantic import BaseModel, Field, field_validator
 
 from app.agents.tools.base import Tool, ToolContext, ToolResult
 from app.schemas.paper_trading import PaperPositionSchema, SubmitPaperOrderRequest
@@ -26,7 +29,7 @@ class _PositionsArgs(BaseModel):
     )
 
 
-class GetPositionsTool(Tool):
+class GetPositionsTool(Tool[_PositionsArgs]):
     name = "get_positions"
     description = "List the authenticated user's open paper-trading positions."
     args_model = _PositionsArgs
@@ -48,14 +51,20 @@ class GetPositionsTool(Tool):
 
 class _SubmitOrderArgs(BaseModel):
     symbol: str = Field(..., min_length=3, max_length=20)
-    side: str = Field(..., description="BUY or SELL")
+    side: Literal["BUY", "SELL"] = Field(..., description="BUY or SELL")
     quantity: float = Field(..., gt=0.0)
     account_id: str | None = Field(default=None, description="Paper account UUID; defaults to first account.")
     stop_loss: float | None = None
     take_profit: float | None = None
 
+    @field_validator("side", mode="before")
+    @classmethod
+    def _normalize_side(cls, value: object) -> object:
+        """Accept any case; the fill engine only understands BUY/SELL."""
+        return value.upper() if isinstance(value, str) else value
 
-class SubmitPaperOrderTool(Tool):
+
+class SubmitPaperOrderTool(Tool[_SubmitOrderArgs]):
     name = "submit_paper_order"
     description = (
         "Submit a MARKET paper-trading order (simulated fill, slippage and fees applied). "
@@ -74,7 +83,7 @@ class SubmitPaperOrderTool(Tool):
         req = SubmitPaperOrderRequest(
             account_id=account_id,
             symbol=args.symbol.upper(),
-            side=args.side.upper(),  # type: ignore[arg-type]
+            side=args.side,
             order_type="MARKET",
             quantity=args.quantity,
             stop_loss=args.stop_loss,
@@ -97,7 +106,7 @@ class _KillSwitchArgs(BaseModel):
     reason: str = Field(default="AGENT_TRIGGERED", max_length=255)
 
 
-class ActivateKillSwitchTool(Tool):
+class ActivateKillSwitchTool(Tool[_KillSwitchArgs]):
     name = "activate_kill_switch"
     description = (
         "Emergency halt: stop trading, cancel all open orders, and engage the circuit breaker "
@@ -113,10 +122,10 @@ class ActivateKillSwitchTool(Tool):
         return self._ok(result if isinstance(result, dict) else {"activated": True})
 
 
-async def _resolve_account_id(service: PaperTradingService, ctx: ToolContext, account_id: str | None):
+async def _resolve_account_id(
+    service: PaperTradingService, ctx: ToolContext, account_id: str | None
+) -> uuid.UUID | None:
     """Return a UUID account id, defaulting to the user's first account when unspecified."""
-    import uuid
-
     user_id = ctx.user_id
     if user_id is None:
         raise PermissionError("This tool requires an authenticated user in context.")
