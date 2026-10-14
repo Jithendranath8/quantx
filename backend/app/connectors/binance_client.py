@@ -81,8 +81,10 @@ class BinanceClient:
         # mainnet's 400+, which silently capped every backtest, walk-forward and
         # optimization run to under a month of data. Order placement still uses
         # the trading host below, so this changes what is *read*, never where
-        # funds move.
-        self.market_data_base_url = self.SPOT_URL
+        # funds move. The host is configurable and defaults to Binance's public
+        # data mirror, which — unlike api.binance.com — is not geo-blocked from
+        # most datacenter regions.
+        self.market_data_base_url = settings.binance_market_data_url
 
         headers = {"Accept": "application/json"}
         if self.api_key:

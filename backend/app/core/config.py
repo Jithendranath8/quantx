@@ -145,6 +145,13 @@ class Settings(BaseSettings):
     binance_secret: str = ""
     binance_testnet: bool = True
 
+    # Host for *reading* public mainnet market data (klines, depth, tickers).
+    # Defaults to Binance's public data mirror rather than api.binance.com
+    # because the main REST API geo-blocks many datacenter regions (HTTP 451),
+    # while data-api.binance.vision serves the same mainnet data unrestricted and
+    # without auth. Override if you deploy somewhere api.binance.com is allowed.
+    binance_market_data_url: str = "https://data-api.binance.vision"
+
     # Hard safety interlock. Placing orders against Binance mainnet requires
     # BOTH binance_testnet=false AND allow_mainnet_trading=true. Defaulting
     # this to false means a misconfigured BINANCE_TESTNET cannot by itself

@@ -166,7 +166,7 @@ class TestMarketDataHostRouting:
             async with BinanceClient(testnet=True) as client:
                 await client.get_klines("BTCUSDT", "1h")
         url = request.await_args.args[1]
-        assert url.startswith(BinanceClient.SPOT_URL)
+        assert url.startswith(client.market_data_base_url)
         assert "testnet" not in url
 
     @pytest.mark.asyncio
@@ -177,7 +177,8 @@ class TestMarketDataHostRouting:
                 request.return_value = mock_response({})
                 async with BinanceClient(testnet=True) as client:
                     await getattr(client, call)(*args)
-            assert request.await_args.args[1].startswith(BinanceClient.SPOT_URL), call
+            assert request.await_args.args[1].startswith(client.market_data_base_url), call
+            assert "testnet" not in request.await_args.args[1], call
 
     @pytest.mark.asyncio
     async def test_order_preflight_price_uses_the_trading_venue(self) -> None:
@@ -200,7 +201,8 @@ class TestMarketDataHostRouting:
             request.return_value = mock_response({"price": "50000.0"})
             async with BinanceClient(testnet=True) as client:
                 await client.get_reference_price("BTCUSDT")
-        assert request.await_args.args[1].startswith(BinanceClient.SPOT_URL)
+        assert request.await_args.args[1].startswith(client.market_data_base_url)
+        assert "testnet" not in request.await_args.args[1]
 
     @pytest.mark.asyncio
     async def test_exchange_info_stays_on_the_trading_venue(self) -> None:
