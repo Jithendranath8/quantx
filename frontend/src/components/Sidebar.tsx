@@ -1,6 +1,6 @@
 import { NavLink } from 'react-router-dom';
 import {
-  Activity, BookOpen, Bot, Cpu, FlaskConical, History, LayoutDashboard,
+  BookOpen, Bot, Cpu, FlaskConical, History, LayoutDashboard,
   Layers, LineChart, ListOrdered, PieChart, Settings, Shield, Terminal, TrendingUp, Wallet, Zap,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
@@ -58,7 +58,6 @@ const navGroups: { heading: string; items: NavItem[] }[] = [
   {
     heading: 'System',
     items: [
-      { to: '/health', icon: Activity, label: 'Health Center' },
       { to: '/logs', icon: Terminal, label: 'Event Ledger' },
       { to: '/settings', icon: Settings, label: 'Settings' },
     ],

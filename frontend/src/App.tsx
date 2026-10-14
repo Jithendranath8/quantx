@@ -9,7 +9,6 @@ import AnalyticsPage from './pages/AnalyticsPage';
 import BacktestPage from './pages/BacktestPage';
 import DashboardPage from './pages/DashboardPage';
 import ExperimentsPage from './pages/ExperimentsPage';
-import HealthCenterPage from './pages/HealthCenterPage';
 import IndicatorsPage from './pages/IndicatorsPage';
 import LiveTradingPage from './pages/LiveTradingPage';
 import LoginPage from './pages/LoginPage';
@@ -57,7 +56,6 @@ export default function App() {
             <Route path="journal" element={<TradeJournalPage />} />
             <Route path="live" element={<LiveTradingPage />} />
             <Route path="analytics" element={<AnalyticsPage />} />
-            <Route path="health" element={<HealthCenterPage />} />
             <Route path="logs" element={<LogsPage />} />
             <Route path="settings" element={<SettingsPage />} />
           </Route>
