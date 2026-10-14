@@ -202,6 +202,25 @@ class Settings(BaseSettings):
         """Whether at least one agent-runtime backend can be reached."""
         return bool(self.anthropic_api_key) or self.ai_provider_configured
 
+    # ── Machine learning / MLOps ─────────────────────────────────────────
+    # Where trained model artifacts and their metadata are written. Batch
+    # training (bash scripts / Celery) writes here; the predict tool reads here.
+    ml_model_dir: str = "./ml_artifacts"
+    # MLflow tracking server URI; when unset, MLflow logs to a local ./mlruns
+    # directory, so experiment tracking works with no server to stand up.
+    mlflow_tracking_uri: str | None = None
+    ml_sequence_length: int = 16
+    ml_default_symbol: str = "BTCUSDT"
+    ml_default_timeframe: str = "1h"
+
+    @field_validator("mlflow_tracking_uri", mode="before")
+    @classmethod
+    def _blank_mlflow_uri_means_default(cls, v: object) -> object:
+        """Treat a blank MLFLOW_TRACKING_URI as unset (local ./mlruns)."""
+        if isinstance(v, str) and not v.strip():
+            return None
+        return v
+
     # ── Celery ───────────────────────────────────────────────────────────
     celery_broker_url: str = "redis://localhost:6379/1"
     celery_result_backend: str = "redis://localhost:6379/2"

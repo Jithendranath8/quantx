@@ -96,6 +96,27 @@ dev = [
     "watchdog>=6.0.0",
 ]
 
+# Machine-learning / MLOps extra. Heavy (deep-learning runtimes), kept out of the
+# core deployment so the API/worker images stay lean. Install with:
+#   pip install -e '.[ml]'
+# On Linux/Mac CPU, install the CPU-only torch wheel to avoid the multi-GB CUDA
+# build (which plain PyPI resolves by default):
+#   pip install torch --index-url https://download.pytorch.org/whl/cpu
+#   pip install -e '.[ml]'
+# PyTorch is the primary backend; TensorFlow is the optional second backend.
+ml = [
+    "torch>=2.5.0",
+    "tensorflow>=2.18.0",
+    "mlflow>=2.18.0",
+    "scikit-learn>=1.5.0",
+]
+
+# Model Context Protocol server (standalone entrypoint: python -m app.mcp.server).
+# Pure-python and light, but kept optional since only the MCP process needs it.
+mcp = [
+    "mcp>=1.2.0",
+]
+
 [tool.ruff]
 target-version = "py313"
 line-length = 120

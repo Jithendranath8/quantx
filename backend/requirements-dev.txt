@@ -20,3 +20,10 @@ types-redis>=4.6.0
 # Dev utilities
 ipython>=8.30.0
 watchdog>=6.0.0
+
+# NOTE: the ML runtime (torch/tensorflow/mlflow) is intentionally NOT in the
+# test image — on Linux, pip resolves a multi-GB CUDA torch build that bloats
+# the image and is useless on CPU/Mac. The ML tests that need a deep-learning
+# runtime use `pytest.importorskip`, so they skip cleanly here; the torch
+# pipeline is verified separately with a CPU-only install (see docs/ML.md).
+# Install the full ML stack with: pip install -e '.[ml]'

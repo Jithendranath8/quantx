@@ -14,6 +14,7 @@ from __future__ import annotations
 from app.agents.tools.backtest_tools import ListStrategiesTool, RunBacktestTool
 from app.agents.tools.base import Tool, ToolContext, ToolResult
 from app.agents.tools.market_tools import GetIndicatorsTool, GetKlinesTool, GetPriceTool
+from app.agents.tools.ml_tools import PredictDirectionTool
 from app.agents.tools.registry import ToolRegistry
 from app.agents.tools.risk_tools import GetRiskStateTool, ValidateTradeTool
 from app.agents.tools.trading_tools import (
@@ -25,7 +26,7 @@ from app.agents.tools.trading_tools import (
 # Tool-group name constants so orchestration/MCP can reference roles without
 # hard-coding string lists in several places.
 MARKET_TOOLS = ["get_price", "get_klines", "get_indicators"]
-RESEARCH_TOOLS = ["list_strategies", "run_backtest"]
+RESEARCH_TOOLS = ["list_strategies", "run_backtest", "predict_direction"]
 RISK_TOOLS = ["validate_trade", "get_risk_state"]
 EXECUTION_TOOLS = ["get_positions", "submit_paper_order", "activate_kill_switch"]
 
@@ -38,9 +39,10 @@ def build_default_registry() -> ToolRegistry:
             GetPriceTool(),
             GetKlinesTool(),
             GetIndicatorsTool(),
-            # Strategies & backtesting
+            # Strategies, backtesting & ML
             ListStrategiesTool(),
             RunBacktestTool(),
+            PredictDirectionTool(),
             # Risk
             ValidateTradeTool(),
             GetRiskStateTool(),
