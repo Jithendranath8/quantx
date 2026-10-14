@@ -308,6 +308,12 @@ class Settings(BaseSettings):
     market_timeframes: str = "1m,5m,15m,1h,4h,1d"
 
     market_stream_enabled: bool = False
+    # Run one market-data coverage sync in the background at startup. The live
+    # stream only writes a bar when it closes, so after any downtime the stored
+    # history has a hole until the next scheduled sync — on deployments without
+    # an always-on worker or an external cron, that hole never heals. The sync
+    # fetches only missing/stale pairs, so it is cheap when the DB is current.
+    market_sync_on_startup: bool = True
     # Both default to the market_* lists when left blank, so the live stream,
     # the stored history and the UI all cover exactly the same ground. Streaming
     # every timeframe is what keeps each one current: a closed bar is written

@@ -5,9 +5,10 @@ Configures the FastAPI app with lifespan events, CORS middleware,
 global exception handlers, and Prometheus instrumentation.
 """
 
+import asyncio
 import secrets
 from collections.abc import AsyncGenerator
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from typing import Any
 
 from fastapi import Depends, FastAPI, HTTPException, Request, status
@@ -34,9 +35,28 @@ from app.core.exceptions import (
 from app.core.logging import get_logger, setup_logging
 from app.core.redis import close_redis, get_redis_client
 from app.websockets.binance_stream import start_market_stream, stop_market_stream
+from app.workers.market_data import _sync_market_data
 
 settings = get_settings()
 logger = get_logger(__name__)
+
+
+async def _startup_market_sync() -> None:
+    """Heal candle-history gaps in the background after boot.
+
+    The live stream persists a bar only when it closes, so any downtime leaves a
+    hole in stored history. On deployments without an always-on worker or an
+    external cron, nothing else repairs it. Runs the same coverage sync the
+    scheduled job uses (missing/stale pairs only); failures are logged, never
+    fatal — the API must come up even if the data provider is unreachable.
+    """
+    try:
+        result = await _sync_market_data()
+        logger.info("startup_market_sync_complete", **result)
+    except asyncio.CancelledError:
+        raise
+    except Exception as exc:
+        logger.error("startup_market_sync_failed", error=str(exc))
 
 
 @asynccontextmanager
@@ -72,12 +92,22 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
             raise RuntimeError(f"Redis is unreachable at startup: {exc}") from exc
 
     await start_market_stream()
+
+    # One-shot background gap-fill; never blocks startup or readiness.
+    sync_task: asyncio.Task[None] | None = None
+    if settings.market_sync_on_startup:
+        sync_task = asyncio.create_task(_startup_market_sync(), name="startup-market-sync")
+
     logger.info("application_started")
 
     yield
 
     # ── Shutdown ─────────────────────────────────────────────────────
     logger.info("application_shutting_down")
+    if sync_task is not None and not sync_task.done():
+        sync_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await sync_task
     await stop_market_stream()
     await close_binance_client()
     await close_redis()
