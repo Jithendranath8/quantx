@@ -100,7 +100,7 @@ export function errorMessage(error: unknown, fallback = 'Something went wrong'):
     if (error.response?.status === 403) return 'You do not have access to this resource.';
     if (error.response?.status === 429) return 'Rate limit reached. Please wait and try again.';
     if (error.response?.status === 501) return 'This capability is not implemented.';
-    if (error.code === 'ERR_NETWORK') return 'Cannot reach the API. Is the backend running?';
+    if (error.code === 'ERR_NETWORK') return 'Unable to reach the server. Please check your connection and try again.';
     return error.message || fallback;
   }
   if (error instanceof Error) return error.message;
