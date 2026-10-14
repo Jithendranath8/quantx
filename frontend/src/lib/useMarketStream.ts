@@ -1,6 +1,21 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
-import { getAccessToken } from './api';
+import { API_BASE_URL, getAccessToken } from './api';
+
+/**
+ * Root for WebSocket URLs. In a split deploy the API lives on another host
+ * (VITE_API_BASE_URL is absolute), and the WebSocket gateway lives with the
+ * API — connecting to window.location.host would hit the static frontend
+ * host, which has no WebSocket server, and live updates would never arrive.
+ * Falls back to same-origin for the nginx/docker-compose deployment.
+ */
+function wsBase(): string {
+  if (/^https?:\/\//.test(API_BASE_URL)) {
+    const api = new URL(API_BASE_URL);
+    return `${api.protocol === 'https:' ? 'wss' : 'ws'}://${api.host}`;
+  }
+  return `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}`;
+}
 
 export interface MarketEvent {
   event_type: 'kline' | 'trade' | 'depth';
@@ -85,8 +100,7 @@ export function useMarketStream(
         return;
       }
 
-      const scheme = window.location.protocol === 'https:' ? 'wss' : 'ws';
-      const url = `${scheme}://${window.location.host}/ws/market/${encodeURIComponent(
+      const url = `${wsBase()}/ws/market/${encodeURIComponent(
         symbol,
       )}?token=${encodeURIComponent(token)}`;
 
