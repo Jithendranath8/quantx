@@ -13,6 +13,13 @@ persisted risk engine.
 **Read [`project_state.md`](project_state.md) before building on this.** It
 lists precisely what is implemented and what is not.
 
+> **Agentic AI layer.** QuantX includes a multi-agent system — tool-calling LLM
+> agents (Claude *or* any OpenAI-compatible model) orchestrated with **LangGraph**,
+> a PyTorch/TensorFlow ML model with **MLflow** tracking, and a **Model Context
+> Protocol** server for Claude Code. The LLM gets *tools*, never control of money:
+> every decision is re-checked by deterministic code and live trading is never
+> reachable from an agent. See **[`docs/AGENTIC.md`](docs/AGENTIC.md)**.
+
 ---
 
 ## Architecture
