@@ -45,8 +45,9 @@ dependencies = [
     "python-binance>=1.0.22",
     "websockets>=14.0",
 
-    # OpenAI
+    # LLM providers for the agentic runtime
     "openai>=1.58.0",
+    "anthropic>=0.40.0",
 
     # Task Queue
     "celery[redis]>=5.4.0",

@@ -166,6 +166,42 @@ class Settings(BaseSettings):
         """
         return bool(self.openai_api_key or self.openai_base_url)
 
+    # ── Agentic LLM runtime ──────────────────────────────────────────────
+    # The tool-calling agent runtime is provider-agnostic. "auto" prefers
+    # Anthropic when an anthropic_api_key is set, otherwise the OpenAI-
+    # compatible backend above (which includes local Ollama / Groq / Gemini).
+    llm_provider: str = "auto"  # auto | anthropic | openai
+    anthropic_api_key: str = ""
+    anthropic_model: str = "claude-sonnet-5-5"
+    # Hard ceiling on tool-calling iterations per agent run, so a model that
+    # keeps requesting tools can never loop forever or exhaust the budget.
+    agent_max_tool_iterations: int = 8
+
+    @field_validator("anthropic_api_key", mode="before")
+    @classmethod
+    def _normalize_anthropic_key(cls, v: object) -> object:
+        """Treat a blank ANTHROPIC_API_KEY as absent, like the OpenAI key."""
+        if isinstance(v, str) and not v.strip():
+            return ""
+        return v
+
+    @property
+    def resolved_llm_provider(self) -> str:
+        """The concrete provider the agent runtime should use.
+
+        Resolves "auto" to a real backend so the rest of the system never has
+        to re-implement the preference order.
+        """
+        choice = (self.llm_provider or "auto").strip().lower()
+        if choice == "auto":
+            return "anthropic" if self.anthropic_api_key else "openai"
+        return choice
+
+    @property
+    def agent_runtime_configured(self) -> bool:
+        """Whether at least one agent-runtime backend can be reached."""
+        return bool(self.anthropic_api_key) or self.ai_provider_configured
+
     # ── Celery ───────────────────────────────────────────────────────────
     celery_broker_url: str = "redis://localhost:6379/1"
     celery_result_backend: str = "redis://localhost:6379/2"
