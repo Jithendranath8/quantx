@@ -6,7 +6,22 @@ managed free tiers (Neon/Supabase/Upstash), including scheme normalization for
 asyncpg and TLS passthrough for Redis.
 """
 
-from app.core.config import Settings, _to_async_dsn, _to_sync_dsn
+import pytest
+
+from app.core.config import DEFAULT_POSTGRES_PASSWORD, Settings, _to_async_dsn, _to_sync_dsn
+
+
+def _prod_settings(**overrides: object) -> Settings:
+    """A production Settings with the always-required secrets already set, so a
+    test can isolate the datastore-credential checks."""
+    base: dict[str, object] = {
+        "app_env": "production",
+        "secret_key": "x" * 48,
+        "jwt_secret_key": "y" * 48,
+        "debug": False,
+    }
+    base.update(overrides)
+    return Settings(**base)  # type: ignore[arg-type]
 
 
 def test_async_dsn_rewrites_scheme_and_drops_query() -> None:
@@ -45,3 +60,37 @@ def test_redis_url_override_supports_tls() -> None:
 def test_redis_url_falls_back_to_components() -> None:
     s = Settings(redis_host="r", redis_port=6380, redis_password="pw", redis_db=2)
     assert s.redis_url == "redis://:pw@r:6380/2"
+
+
+def test_production_safety_passes_with_managed_urls() -> None:
+    # Neon/Upstash carry the credential inside the override string, so the unused
+    # component-password defaults must not block a correctly-configured deploy.
+    s = _prod_settings(
+        DATABASE_URL="postgresql://u:p@ep.neon.tech/db?sslmode=require",
+        REDIS_URL="rediss://default:tok@up.upstash.io:6379",
+    )
+    s.validate_production_safety()  # must not raise
+
+
+def test_production_safety_rejects_default_postgres_without_override() -> None:
+    # No DATABASE_URL: the component password is live, so its default is unsafe.
+    # Values are forced explicitly so the test does not depend on the container's
+    # own POSTGRES_* / DATABASE_URL env (init kwargs outrank the environment).
+    s = _prod_settings(
+        DATABASE_URL="",
+        postgres_password=DEFAULT_POSTGRES_PASSWORD,
+        REDIS_URL="rediss://default:tok@up.upstash.io:6379",
+    )
+    with pytest.raises(RuntimeError, match="POSTGRES_PASSWORD"):
+        s.validate_production_safety()
+
+
+def test_production_safety_rejects_empty_redis_without_override() -> None:
+    # No REDIS_URL and no component password: Redis would be unauthenticated.
+    s = _prod_settings(
+        DATABASE_URL="postgresql://u:p@ep.neon.tech/db",
+        REDIS_URL="",
+        redis_password="",
+    )
+    with pytest.raises(RuntimeError, match="REDIS_PASSWORD"):
+        s.validate_production_safety()

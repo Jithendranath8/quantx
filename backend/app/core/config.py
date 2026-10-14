@@ -363,12 +363,16 @@ class Settings(BaseSettings):
             problems.append("SECRET_KEY is still the default value")
         if self.jwt_secret_key == DEFAULT_JWT_SECRET_KEY:
             problems.append("JWT_SECRET_KEY is still the default value")
-        if self.postgres_password == DEFAULT_POSTGRES_PASSWORD:
-            problems.append("POSTGRES_PASSWORD is still the default value")
+        # The component password is only used when there is no DATABASE_URL /
+        # REDIS_URL override. Managed providers (Neon, Upstash, …) embed the
+        # credential in that single connection string, so requiring the
+        # component password there would reject a correctly-configured deploy.
+        if not self.database_url_override and self.postgres_password == DEFAULT_POSTGRES_PASSWORD:
+            problems.append("POSTGRES_PASSWORD is still the default value (or set DATABASE_URL)")
         if self.debug:
             problems.append("DEBUG is enabled")
-        if not self.redis_password:
-            problems.append("REDIS_PASSWORD is empty")
+        if not self.redis_url_override and not self.redis_password:
+            problems.append("REDIS_PASSWORD is empty (or set REDIS_URL)")
 
         if problems:
             raise RuntimeError(
