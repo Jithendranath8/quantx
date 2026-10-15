@@ -15,6 +15,7 @@ reach further back than that no matter what start time is requested.
 
 import asyncio
 from datetime import UTC, datetime
+from typing import Any
 
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -144,7 +145,7 @@ class DerivativesIngestService:
 
     # ── Internals ────────────────────────────────────────────────────
 
-    async def _upsert_funding(self, rows: list[dict]) -> int:
+    async def _upsert_funding(self, rows: list[dict[str, Any]]) -> int:
         """Upsert funding rows on the (symbol, timestamp) unique index."""
         if not rows:
             return 0
@@ -156,7 +157,7 @@ class DerivativesIngestService:
         await self._session.execute(stmt)
         return len(rows)
 
-    async def _upsert_open_interest(self, rows: list[dict]) -> int:
+    async def _upsert_open_interest(self, rows: list[dict[str, Any]]) -> int:
         """Upsert open-interest rows on the (symbol, timestamp) unique index."""
         if not rows:
             return 0

@@ -30,8 +30,12 @@ httpx>=0.28.0
 # Binance (REST via httpx in app.connectors; python-binance is not used)
 websockets>=14.0
 
-# OpenAI
+# LLM providers for the agentic runtime (OpenAI-compatible + Anthropic native tool use)
 openai>=1.58.0
+anthropic>=0.40.0
+
+# Multi-agent orchestration
+langgraph>=0.2.0
 
 # Tasks
 celery[redis]>=5.4.0

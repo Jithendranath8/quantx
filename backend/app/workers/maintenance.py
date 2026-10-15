@@ -65,12 +65,12 @@ async def _prune_expired_data() -> dict[str, int]:
             while True:
                 ids = (
                     await session.execute(
-                        select(model.id).where(column < cutoff).limit(DELETE_CHUNK_SIZE)
+                        select(model.id).where(column < cutoff)  # type: ignore[attr-defined]  # retention models declare id.limit(DELETE_CHUNK_SIZE)
                     )
                 ).scalars().all()
                 if not ids:
                     break
-                await session.execute(delete(model).where(model.id.in_(ids)))
+                await session.execute(delete(model).where(model.id.in_(ids)))  # type: ignore[attr-defined]  # retention models declare id
                 await session.commit()
                 total += len(ids)
                 if len(ids) < DELETE_CHUNK_SIZE:

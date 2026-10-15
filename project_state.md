@@ -24,7 +24,9 @@ than no state file, because it causes people to build on things that do not work
 | Backtesting | Working. Event-driven, long/short, SL/TP, fees, slippage. |
 | Research suite | Working. Walk-forward, grid/random/TPE search, Monte Carlo, bias audit, auto-registered with dataset fingerprints. |
 | Indicators | Working. 14 indicators, Wilder smoothing for RSI/ATR/ADX. |
-| AI agent | Implemented against any OpenAI-compatible endpoint (OpenAI, local Ollama, Gemini, Groq). Degrades to WAIT when unconfigured or when the provider fails. Decisions are settled by forward test, so win rate is measured. |
+| AI agent (single-shot) | Implemented against any OpenAI-compatible endpoint (OpenAI, local Ollama, Gemini, Groq). Degrades to WAIT when unconfigured or when the provider fails. Decisions are settled by forward test, so win rate is measured. |
+| Agentic layer | Working, additive. Provider-neutral tool layer, a tool-calling runtime over Claude or OpenAI-compatible models, a LangGraph multi-agent graph (market/technical/quant/risk → synthesis → optional paper execution) at `POST /api/v1/agent/orchestrate`, and an MCP server. Covered by unit + integration tests; see `docs/AGENTIC.md`. The deterministic validator and risk gate still decide; live trading is never agent-reachable. |
+| ML / MLOps | PyTorch LSTM (primary) + TensorFlow MLP next-bar-direction model, MLflow tracking, `python -m app.ml.cli` + `scripts/train_model.sh`. Exposed to the quant agent as `predict_direction`. Runtimes are the optional `[ml]` extra (use the CPU torch wheel); degrades cleanly when absent. |
 | Frontend | Working. All 18 pages call the API; Market Data streams over WebSocket. Builds, typechecks, lints clean. |
 | Market data ingestion | Working. Closed bars are written to the database straight from the live stream, so stored history trails real time by one bar. The 10-minute REST sync remains as backfill and gap repair; funding rate and open interest on their own schedule. Live WebSocket stream is off by default (`MARKET_STREAM_ENABLED`). |
 | Monitoring | Prometheus metrics (authenticated) + Grafana provisioning. |

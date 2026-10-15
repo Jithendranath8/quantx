@@ -51,8 +51,8 @@ async def _check_system_health() -> dict[str, Any]:
     try:
         from app.connectors.binance_client import BinanceClient
 
-        async with BinanceClient() as client:
-            results["binance"] = "healthy" if await client.ping() else "unhealthy"
+        async with BinanceClient() as binance:
+            results["binance"] = "healthy" if await binance.ping() else "unhealthy"
     except Exception as exc:
         results["binance"] = "unhealthy"
         results["binance_error"] = str(exc)

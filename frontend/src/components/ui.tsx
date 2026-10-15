@@ -1,7 +1,7 @@
 import React from 'react';
 import { AlertCircle, Inbox, Loader2, RefreshCw } from 'lucide-react';
 
-/** Page heading with optional description and right-aligned actions. */
+/** Page heading with an accent eyebrow, optional description and right-aligned actions. */
 export function PageHeader({
   title,
   description,
@@ -12,17 +12,20 @@ export function PageHeader({
   actions?: React.ReactNode;
 }) {
   return (
-    <div className="flex items-start justify-between gap-4">
-      <div>
-        <h2 className="text-2xl font-bold text-white">{title}</h2>
-        {description && <p className="text-sm text-slate-400 mt-1">{description}</p>}
+    <div className="flex items-start justify-between gap-4 animate-fade-in-up">
+      <div className="min-w-0">
+        <div className="flex items-center gap-2.5">
+          <span className="h-5 w-1 rounded-full bg-brand-gradient" />
+          <h2 className="text-2xl font-bold text-white">{title}</h2>
+        </div>
+        {description && <p className="text-sm text-slate-400 mt-1.5 pl-3.5">{description}</p>}
       </div>
       {actions && <div className="flex items-center gap-2 shrink-0">{actions}</div>}
     </div>
   );
 }
 
-/** Bordered panel used for every content block. */
+/** Elevated, frosted panel used for every content block. */
 export function Card({
   title,
   icon,
@@ -37,12 +40,18 @@ export function Card({
   className?: string;
 }) {
   return (
-    <div className={`rounded-xl bg-slate-900/50 border border-slate-800 overflow-hidden ${className}`}>
+    <div
+      className={`glass rounded-2xl overflow-hidden transition-shadow duration-300 hover:shadow-card-hover ${className}`}
+    >
       {(title || actions) && (
-        <div className="px-5 py-4 border-b border-slate-800 flex items-center justify-between gap-4">
+        <div className="px-5 py-3.5 border-b hairline flex items-center justify-between gap-4">
           {title && (
-            <h3 className="text-base font-semibold text-white flex items-center gap-2">
-              {icon}
+            <h3 className="text-sm font-semibold text-white flex items-center gap-2.5">
+              {icon && (
+                <span className="grid place-items-center w-7 h-7 rounded-lg bg-cyan-500/10 text-cyan-400 ring-1 ring-inset ring-cyan-500/20">
+                  {icon}
+                </span>
+              )}
               {title}
             </h3>
           )}
@@ -54,7 +63,28 @@ export function Card({
   );
 }
 
-/** Single metric tile. */
+const TONE_TEXT = {
+  neutral: 'text-slate-400',
+  positive: 'text-emerald-400',
+  negative: 'text-red-400',
+  warning: 'text-amber-400',
+} as const;
+
+const TONE_CHIP = {
+  neutral: 'bg-slate-500/10 text-slate-300 ring-slate-400/20',
+  positive: 'bg-emerald-500/10 text-emerald-400 ring-emerald-500/25',
+  negative: 'bg-red-500/10 text-red-400 ring-red-500/25',
+  warning: 'bg-amber-500/10 text-amber-400 ring-amber-500/25',
+} as const;
+
+const TONE_BAR = {
+  neutral: 'from-slate-500/0 to-slate-500/0',
+  positive: 'from-emerald-500/60 to-emerald-500/0',
+  negative: 'from-red-500/60 to-red-500/0',
+  warning: 'from-amber-500/60 to-amber-500/0',
+} as const;
+
+/** Single metric tile with a tone-coloured accent and icon chip. */
 export function StatTile({
   label,
   value,
@@ -68,28 +98,27 @@ export function StatTile({
   tone?: 'neutral' | 'positive' | 'negative' | 'warning';
   icon?: React.ReactNode;
 }) {
-  const toneClass = {
-    neutral: 'text-slate-400',
-    positive: 'text-emerald-400',
-    negative: 'text-red-400',
-    warning: 'text-amber-400',
-  }[tone];
-
   return (
-    <div className="p-5 rounded-xl bg-slate-900/50 border border-slate-800">
+    <div className="group relative glass rounded-2xl p-5 overflow-hidden transition-all duration-300 hover:shadow-card-hover hover:-translate-y-0.5">
+      {/* tone accent along the top edge */}
+      <span className={`absolute inset-x-0 top-0 h-px bg-gradient-to-r ${TONE_BAR[tone]}`} />
       <div className="flex items-center justify-between mb-3">
-        <span className="text-xs font-medium text-slate-400 uppercase tracking-wider">{label}</span>
-        {icon && <span className="text-slate-600">{icon}</span>}
+        <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">{label}</span>
+        {icon && (
+          <span className={`grid place-items-center w-8 h-8 rounded-lg ring-1 ring-inset ${TONE_CHIP[tone]}`}>
+            {icon}
+          </span>
+        )}
       </div>
-      <div className="text-2xl font-bold text-white font-mono">{value}</div>
+      <div className="text-[1.65rem] leading-none font-bold text-white font-mono">{value}</div>
       {sub !== undefined && sub !== null && (
-        <div className={`mt-1 text-xs font-medium ${toneClass}`}>{sub}</div>
+        <div className={`mt-2 text-xs font-medium ${TONE_TEXT[tone]}`}>{sub}</div>
       )}
     </div>
   );
 }
 
-/** Coloured pill for statuses and actions. */
+/** Coloured pill for statuses and actions, with a leading status dot. */
 export function Badge({
   children,
   tone = 'neutral',
@@ -98,15 +127,25 @@ export function Badge({
   tone?: 'neutral' | 'positive' | 'negative' | 'warning' | 'info';
 }) {
   const toneClass = {
-    neutral: 'bg-slate-500/10 text-slate-300 border-slate-500/20',
-    positive: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20',
-    negative: 'bg-red-500/10 text-red-400 border-red-500/20',
-    warning: 'bg-amber-500/10 text-amber-400 border-amber-500/20',
-    info: 'bg-cyan-500/10 text-cyan-400 border-cyan-500/20',
+    neutral: 'bg-slate-500/10 text-slate-300 ring-slate-500/20',
+    positive: 'bg-emerald-500/10 text-emerald-300 ring-emerald-500/25',
+    negative: 'bg-red-500/10 text-red-300 ring-red-500/25',
+    warning: 'bg-amber-500/10 text-amber-300 ring-amber-500/25',
+    info: 'bg-cyan-500/10 text-cyan-300 ring-cyan-500/25',
+  }[tone];
+  const dotClass = {
+    neutral: 'bg-slate-400',
+    positive: 'bg-emerald-400',
+    negative: 'bg-red-400',
+    warning: 'bg-amber-400',
+    info: 'bg-cyan-400',
   }[tone];
 
   return (
-    <span className={`px-2.5 py-0.5 rounded-full text-xs font-bold border ${toneClass}`}>
+    <span
+      className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold ring-1 ring-inset ${toneClass}`}
+    >
+      <span className={`w-1.5 h-1.5 rounded-full ${dotClass}`} />
       {children}
     </span>
   );
@@ -114,8 +153,8 @@ export function Badge({
 
 export function LoadingState({ label = 'Loading…' }: { label?: string }) {
   return (
-    <div className="flex items-center justify-center gap-2 py-12 text-slate-500 text-sm">
-      <Loader2 className="w-4 h-4 animate-spin" />
+    <div className="flex items-center justify-center gap-2 py-14 text-slate-500 text-sm">
+      <Loader2 className="w-4 h-4 animate-spin text-cyan-400" />
       {label}
     </div>
   );
@@ -123,14 +162,16 @@ export function LoadingState({ label = 'Loading…' }: { label?: string }) {
 
 export function ErrorState({ message, onRetry }: { message: string; onRetry?: () => void }) {
   return (
-    <div className="flex flex-col items-center justify-center gap-3 py-12 px-5 text-center">
-      <AlertCircle className="w-6 h-6 text-red-400" />
+    <div className="flex flex-col items-center justify-center gap-3 py-14 px-5 text-center">
+      <span className="grid place-items-center w-11 h-11 rounded-xl bg-red-500/10 ring-1 ring-inset ring-red-500/20">
+        <AlertCircle className="w-5 h-5 text-red-400" />
+      </span>
       <p className="text-sm text-red-300 max-w-lg">{message}</p>
       {onRetry && (
         <button
           type="button"
           onClick={onRetry}
-          className="flex items-center gap-1.5 text-xs text-slate-400 hover:text-cyan-400 transition-colors"
+          className="inline-flex items-center gap-1.5 text-xs text-slate-400 hover:text-cyan-400 transition-colors"
         >
           <RefreshCw className="w-3 h-3" /> Retry
         </button>
@@ -141,10 +182,12 @@ export function ErrorState({ message, onRetry }: { message: string; onRetry?: ()
 
 export function EmptyState({ message, hint }: { message: string; hint?: string }) {
   return (
-    <div className="flex flex-col items-center justify-center gap-2 py-12 px-5 text-center">
-      <Inbox className="w-6 h-6 text-slate-600" />
-      <p className="text-sm text-slate-400">{message}</p>
-      {hint && <p className="text-xs text-slate-600 max-w-md">{hint}</p>}
+    <div className="flex flex-col items-center justify-center gap-2 py-14 px-5 text-center">
+      <span className="grid place-items-center w-11 h-11 rounded-xl bg-slate-500/10 ring-1 ring-inset ring-slate-500/15">
+        <Inbox className="w-5 h-5 text-slate-500" />
+      </span>
+      <p className="text-sm text-slate-300">{message}</p>
+      {hint && <p className="text-xs text-slate-500 max-w-md">{hint}</p>}
     </div>
   );
 }
@@ -194,9 +237,13 @@ export function Button({
   className?: string;
 }) {
   const variantClass = {
-    primary: 'bg-cyan-600 hover:bg-cyan-500 text-white border-cyan-500',
-    secondary: 'bg-slate-800 hover:bg-slate-700 text-slate-200 border-slate-700',
-    danger: 'bg-red-600 hover:bg-red-500 text-white border-red-500',
+    primary:
+      'text-white bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 ' +
+      'shadow-lg shadow-cyan-600/20 hover:shadow-glow-sm',
+    secondary:
+      'text-slate-200 bg-white/[0.04] hover:bg-white/[0.08] ring-1 ring-inset ring-white/10 hover:ring-white/20',
+    danger:
+      'text-white bg-gradient-to-r from-red-500 to-rose-600 hover:from-red-400 hover:to-rose-500 shadow-lg shadow-red-600/20',
   }[variant];
 
   return (
@@ -204,7 +251,11 @@ export function Button({
       type={type}
       onClick={onClick}
       disabled={disabled}
-      className={`px-3.5 py-1.5 rounded-lg border text-xs font-semibold transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${variantClass} ${className}`}
+      className={
+        'px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all duration-200 ' +
+        'focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400/60 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950 ' +
+        `disabled:opacity-40 disabled:cursor-not-allowed disabled:shadow-none ${variantClass} ${className}`
+      }
     >
       {children}
     </button>
@@ -220,15 +271,16 @@ export function Field({
 }) {
   return (
     <label className="flex flex-col gap-1.5">
-      <span className="text-xs font-medium text-slate-400 uppercase tracking-wider">{label}</span>
+      <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">{label}</span>
       {children}
     </label>
   );
 }
 
 const inputClass =
-  'px-3 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-sm text-white font-mono ' +
-  'focus:outline-none focus:border-cyan-600 transition-colors disabled:opacity-40';
+  'px-3 py-1.5 rounded-lg bg-slate-950/60 ring-1 ring-inset ring-white/10 text-sm text-white font-mono ' +
+  'placeholder:text-slate-600 focus:outline-none focus:ring-2 focus:ring-cyan-500/60 transition-shadow ' +
+  'disabled:opacity-40';
 
 export function TextInput(props: React.InputHTMLAttributes<HTMLInputElement>) {
   return <input {...props} className={`${inputClass} ${props.className ?? ''}`} />;
@@ -250,7 +302,7 @@ export function TableWrap({ children }: { children: React.ReactNode }) {
 export function Th({ children, align = 'left' }: { children?: React.ReactNode; align?: 'left' | 'right' }) {
   return (
     <th
-      className={`px-5 py-2.5 text-xs font-medium text-slate-500 uppercase tracking-wider whitespace-nowrap ${
+      className={`px-5 py-2.5 text-[11px] font-semibold text-slate-500 uppercase tracking-wider whitespace-nowrap ${
         align === 'right' ? 'text-right' : 'text-left'
       }`}
     >

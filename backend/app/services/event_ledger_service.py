@@ -7,6 +7,7 @@ risk decision, order status change, position change, and kill switch activation.
 
 import uuid
 from datetime import UTC, datetime
+from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -24,7 +25,7 @@ class EventLedgerService:
         self,
         source: str,
         event_type: str,
-        payload: dict,
+        payload: dict[str, Any],
         user_id: uuid.UUID | None = None,
         account_id: uuid.UUID | None = None,
         symbol: str | None = None,

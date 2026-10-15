@@ -136,7 +136,7 @@ class Base(DeclarativeBase):
 
     def __repr__(self) -> str:
         """Generate a developer-friendly representation."""
-        pk_cols = [col.name for col in self.__table__.primary_key.columns]
+        pk_cols = [col.name for col in self.__table__.primary_key.columns]  # type: ignore[attr-defined]  # SQLAlchemy typing gap
         pk_vals = ", ".join(f"{col}={getattr(self, col, '?')}" for col in pk_cols)
         return f"<{self.__class__.__name__}({pk_vals})>"
 

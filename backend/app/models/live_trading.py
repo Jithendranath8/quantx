@@ -9,6 +9,7 @@ orders that moved real funds.
 
 import uuid
 from datetime import datetime
+from typing import Any
 
 from sqlalchemy import Boolean, DateTime, Float, Index, String
 from sqlalchemy.dialects.postgresql import JSONB, UUID
@@ -50,7 +51,7 @@ class LiveOrder(Base):
 
     is_testnet: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     rejection_reason: Mapped[str | None] = mapped_column(String(500), nullable=True)
-    raw_response: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    raw_response: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
     transact_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     __table_args__ = (

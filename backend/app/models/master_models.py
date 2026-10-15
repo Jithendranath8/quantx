@@ -16,6 +16,7 @@ Includes:
 
 import uuid
 from datetime import UTC, datetime
+from typing import Any
 
 from sqlalchemy import Boolean, DateTime, Float, Index, Integer, String, Text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
@@ -41,7 +42,7 @@ class EventLedger(Base):
     symbol: Mapped[str | None] = mapped_column(String(20), nullable=True, index=True)
     source: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
     event_type: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
-    payload: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    payload: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
     correlation_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
 
 
@@ -65,19 +66,19 @@ class TradeJournal(Base):
     take_profit: Mapped[float | None] = mapped_column(Float, nullable=True)
     risk_reward: Mapped[float | None] = mapped_column(Float, nullable=True)
     market_structure: Mapped[str | None] = mapped_column(String(50), nullable=True)
-    indicators_snapshot: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
-    orderbook_snapshot: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    indicators_snapshot: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+    orderbook_snapshot: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
     funding_rate: Mapped[float | None] = mapped_column(Float, nullable=True)
     open_interest: Mapped[float | None] = mapped_column(Float, nullable=True)
-    liquidations_data: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    liquidations_data: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
     ai_reasoning: Mapped[str | None] = mapped_column(Text, nullable=True)
-    strategy_signal: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
-    execution_details: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    strategy_signal: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+    execution_details: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
     realized_pnl: Mapped[float | None] = mapped_column(Float, nullable=True)
     screenshot_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
     user_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     lessons: Mapped[str | None] = mapped_column(Text, nullable=True)
-    tags: Mapped[list | None] = mapped_column(JSONB, nullable=True, default=list)
+    tags: Mapped[list[Any] | None] = mapped_column(JSONB, nullable=True, default=list)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC))
 
 
@@ -101,7 +102,7 @@ class OrderFlowSnapshot(Base):
     aggressive_sell_vol: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
     taker_buy_sell_ratio: Mapped[float] = mapped_column(Float, nullable=False, default=1.0)
     volume_delta: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
-    liquidity_gaps: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    liquidity_gaps: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
 
 
 class LiquidationEvent(Base):
@@ -159,7 +160,7 @@ class NewsArticle(Base):
     sentiment_label: Mapped[str] = mapped_column(String(20), nullable=False, default="NEUTRAL")  # BULLISH / BEARISH / NEUTRAL
     event_type: Mapped[str] = mapped_column(String(50), nullable=False, index=True)  # CPI, FOMC, FED, REGULATION, ETC
     relevance_score: Mapped[float] = mapped_column(Float, nullable=False, default=1.0)
-    symbols: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    symbols: Mapped[list[Any]] = mapped_column(JSONB, nullable=False, default=list)
     summary: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
@@ -196,7 +197,7 @@ class ExperimentRecord(Base):
     experiment_id: Mapped[str] = mapped_column(String(64), nullable=False, unique=True, index=True)
     strategy_name: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
     strategy_version: Mapped[str] = mapped_column(String(20), nullable=False, default="v1.0")
-    parameters: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    parameters: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
     dataset_version: Mapped[str] = mapped_column(String(64), nullable=False)
     symbol: Mapped[str] = mapped_column(String(20), nullable=False)
     timeframe: Mapped[str] = mapped_column(String(10), nullable=False)
@@ -206,7 +207,7 @@ class ExperimentRecord(Base):
     slippage: Mapped[float] = mapped_column(Float, nullable=False)
     latency_ms: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     ai_model: Mapped[str | None] = mapped_column(String(50), nullable=True)
-    metrics: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    metrics: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
     git_commit: Mapped[str | None] = mapped_column(String(40), nullable=True)
     # Row count behind dataset_version, so two runs sharing a fingerprint can
     # be confirmed to have seen the same amount of data.
@@ -248,12 +249,12 @@ class AIDecisionLog(Base):
     model: Mapped[str] = mapped_column(String(50), nullable=False)
     model_version: Mapped[str] = mapped_column(String(20), nullable=False, default="1.0")
     prompt_version: Mapped[str] = mapped_column(String(20), nullable=False, default="1.0")
-    input_snapshot: Mapped[dict] = mapped_column(JSONB, nullable=False)
-    output_decision: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    input_snapshot: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    output_decision: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
     confidence: Mapped[float] = mapped_column(Float, nullable=False)
     action: Mapped[str] = mapped_column(String(10), nullable=False)
     latency_ms: Mapped[int] = mapped_column(Integer, nullable=False)
-    token_usage: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    token_usage: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
     estimated_cost_usd: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
     was_validated: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     validation_rejection_reason: Mapped[str | None] = mapped_column(String(255), nullable=True)

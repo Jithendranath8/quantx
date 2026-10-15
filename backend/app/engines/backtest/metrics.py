@@ -4,6 +4,8 @@ QuantX — Backtesting Performance Metrics Calculator.
 Computes Sharpe Ratio, Sortino Ratio, Max Drawdown %, Win Rate %, and Profit Factor.
 """
 
+from typing import Any
+
 import numpy as np
 import pandas as pd
 
@@ -42,7 +44,7 @@ class PerformanceMetricsCalculator:
     @staticmethod
     def calculate(
         initial_capital: float,
-        trades: list[dict],
+        trades: list[dict[str, Any]],
         equity_series: pd.Series,
         timeframe: str = "1h",
     ) -> BacktestMetrics:

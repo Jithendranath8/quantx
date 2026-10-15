@@ -45,8 +45,12 @@ dependencies = [
     "python-binance>=1.0.22",
     "websockets>=14.0",
 
-    # OpenAI
+    # LLM providers for the agentic runtime
     "openai>=1.58.0",
+    "anthropic>=0.40.0",
+
+    # Multi-agent orchestration
+    "langgraph>=0.2.0",
 
     # Task Queue
     "celery[redis]>=5.4.0",
@@ -92,6 +96,27 @@ dev = [
     "watchdog>=6.0.0",
 ]
 
+# Machine-learning / MLOps extra. Heavy (deep-learning runtimes), kept out of the
+# core deployment so the API/worker images stay lean. Install with:
+#   pip install -e '.[ml]'
+# On Linux/Mac CPU, install the CPU-only torch wheel to avoid the multi-GB CUDA
+# build (which plain PyPI resolves by default):
+#   pip install torch --index-url https://download.pytorch.org/whl/cpu
+#   pip install -e '.[ml]'
+# PyTorch is the primary backend; TensorFlow is the optional second backend.
+ml = [
+    "torch>=2.5.0",
+    "tensorflow>=2.18.0",
+    "mlflow>=2.18.0",
+    "scikit-learn>=1.5.0",
+]
+
+# Model Context Protocol server (standalone entrypoint: python -m app.mcp.server).
+# Pure-python and light, but kept optional since only the MCP process needs it.
+mcp = [
+    "mcp>=1.2.0",
+]
+
 [tool.ruff]
 target-version = "py313"
 line-length = 120
@@ -121,6 +146,28 @@ strict = true
 warn_return_any = true
 warn_unused_configs = true
 plugins = ["pydantic.mypy"]
+
+# Optional / unstubbed third-party modules. The ML and MCP runtimes are optional
+# extras (not installed in the core image), and pandas ships no stubs by default,
+# so treat their imports as untyped rather than failing the type check.
+[[tool.mypy.overrides]]
+module = [
+    "torch.*",
+    "tensorflow.*",
+    "mlflow",
+    "mcp.*",
+    "pandas",
+    "jose",
+    "celery",
+    "celery.*",
+]
+ignore_missing_imports = true
+
+# The MCP server and the Celery workers wrap untyped third-party decorator APIs;
+# relax that one check for those modules rather than littering them with per-call ignores.
+[[tool.mypy.overrides]]
+module = ["app.mcp.server", "app.workers.*"]
+disallow_untyped_decorators = false
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

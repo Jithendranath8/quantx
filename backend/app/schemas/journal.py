@@ -4,6 +4,7 @@ QuantX — Trade Journal Pydantic Schemas.
 
 import uuid
 from datetime import datetime
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict
 
@@ -17,8 +18,8 @@ class CreateJournalEntryRequest(BaseModel):
     take_profit: float | None = None
     risk_reward: float | None = None
     market_structure: str | None = None
-    indicators_snapshot: dict | None = None
-    orderbook_snapshot: dict | None = None
+    indicators_snapshot: dict[str, Any] | None = None
+    orderbook_snapshot: dict[str, Any] | None = None
     ai_reasoning: str | None = None
     realized_pnl: float | None = None
     user_notes: str | None = None
@@ -43,5 +44,5 @@ class JournalEntrySchema(BaseModel):
     realized_pnl: float | None
     user_notes: str | None
     lessons: str | None
-    tags: list | None
+    tags: list[str] | None
     created_at: datetime

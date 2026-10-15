@@ -33,7 +33,7 @@ TPE_GOOD_QUANTILE = 0.25
 class OptimizationCandidate(BaseModel):
     """One parameter set and the performance it produced."""
 
-    params: dict
+    params: dict[str, Any]
     sharpe_ratio: float
     sortino_ratio: float
     total_return_pct: float

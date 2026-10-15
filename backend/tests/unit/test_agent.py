@@ -4,8 +4,9 @@ QuantX — Unit Tests for the AI Trading Agent, prompt builder, and validator.
 
 import pytest
 
+from app.agents.llm.pricing import estimate_cost_usd, is_free_endpoint
 from app.agents.prompt_builder import PromptBuilder
-from app.agents.trading_agent import AITradingAgent
+from app.agents.single_shot import SingleShotAnalyst
 from app.agents.validator import AIDecisionValidator
 from app.schemas.agent import AgentDecision, AgentMarketContext
 
@@ -23,8 +24,8 @@ def market_context() -> AgentMarketContext:
 
 
 @pytest.mark.unit
-class TestAIAgent:
-    """Prompt construction and failure handling."""
+class TestSingleShotAnalyst:
+    """Prompt construction and failure handling of the single-shot analyst."""
 
     def test_prompt_builder(self, market_context: AgentMarketContext) -> None:
         """The prompt carries the structured context through to the model."""
@@ -39,11 +40,11 @@ class TestAIAgent:
         assert payload["indicators"]["rsi_14"] == pytest.approx(28.5)
 
     @pytest.mark.asyncio
-    async def test_missing_api_key_degrades_to_wait(
+    async def test_no_provider_degrades_to_wait(
         self, market_context: AgentMarketContext
     ) -> None:
-        """No API key yields a safe WAIT rather than an exception."""
-        analysis = await AITradingAgent(api_key="").analyze(market_context)
+        """With no provider the analyst yields a safe WAIT, not an exception."""
+        analysis = await SingleShotAnalyst(None).analyze(market_context)
         assert analysis.succeeded is False
         assert analysis.decision.action == "WAIT"
         assert analysis.decision.confidence == 0.0
@@ -52,51 +53,30 @@ class TestAIAgent:
     @pytest.mark.asyncio
     async def test_analysis_reports_latency(self, market_context: AgentMarketContext) -> None:
         """Every analysis carries real operational metadata."""
-        analysis = await AITradingAgent(api_key="").analyze(market_context)
+        analysis = await SingleShotAnalyst(None).analyze(market_context)
         assert analysis.latency_ms >= 0
         assert analysis.model
         assert analysis.estimated_cost_usd == 0.0  # no tokens were consumed
 
-    def test_cost_estimate_uses_token_counts(self) -> None:
-        """Cost is derived from tokens and model price, not a constant."""
-        agent = AITradingAgent(api_key="", model="gpt-4o")
-        cost = agent._estimate_cost({"prompt_tokens": 1_000_000, "completion_tokens": 0})
-        assert cost == pytest.approx(2.50)
+    @pytest.mark.asyncio
+    async def test_unconfigured_explains_how_to_fix(
+        self, market_context: AgentMarketContext
+    ) -> None:
+        """The WAIT reason names the env vars to set."""
+        analysis = await SingleShotAnalyst(None).analyze(market_context)
+        assert analysis.succeeded is False
+        assert "OPENAI_BASE_URL" in analysis.decision.reasoning
+        assert "ANTHROPIC_API_KEY" in analysis.decision.reasoning
 
 
 @pytest.mark.unit
-class TestProviderConfiguration:
-    """The agent works against any OpenAI-compatible endpoint.
+class TestCostEstimation:
+    """Token-cost estimation is honest: unknown price and free endpoints -> 0."""
 
-    Tying it to OpenAI meant a billing problem disabled the whole feature. A
-    base_url alone is enough, so a local model needs no credential at all.
-    """
-
-    def test_no_provider_at_all_disables_the_client(self) -> None:
-        """With neither key nor endpoint there is nothing to call."""
-        agent = AITradingAgent(api_key="", base_url=None)
-        assert agent.client is None
-
-    def test_base_url_alone_is_sufficient(self) -> None:
-        """A self-hosted endpoint needs no API key."""
-        agent = AITradingAgent(api_key="", base_url="http://localhost:11434/v1")
-        assert agent.client is not None
-        assert str(agent.client.base_url).startswith("http://localhost:11434")
-
-    def test_key_alone_still_targets_openai(self) -> None:
-        """Existing OpenAI configurations keep working unchanged."""
-        agent = AITradingAgent(api_key="sk-test", base_url=None)
-        assert agent.client is not None
-        assert "api.openai.com" in str(agent.client.base_url)
-
-    @pytest.mark.asyncio
-    async def test_unconfigured_agent_explains_both_options(
-        self, market_context: AgentMarketContext
-    ) -> None:
-        """The WAIT reason tells you how to fix it."""
-        analysis = await AITradingAgent(api_key="", base_url=None).analyze(market_context)
-        assert analysis.succeeded is False
-        assert "OPENAI_BASE_URL" in analysis.decision.reasoning
+    def test_cost_from_token_counts(self) -> None:
+        """Cost is derived from tokens and model price, not a constant."""
+        cost = estimate_cost_usd("gpt-4o", {"prompt_tokens": 1_000_000, "completion_tokens": 0})
+        assert cost == pytest.approx(2.50)
 
     @pytest.mark.parametrize(
         "base_url",
@@ -107,27 +87,19 @@ class TestProviderConfiguration:
         ],
     )
     def test_local_endpoints_report_zero_cost(self, base_url: str) -> None:
-        """A model on your own machine costs nothing per token.
-
-        Reporting an inferred dollar figure for it would be a fabricated
-        number, which is the thing the observability layer exists to prevent.
-        """
-        agent = AITradingAgent(api_key="", model="llama3.2:1b", base_url=base_url)
-        assert agent._is_free_endpoint() is True
-        assert agent._estimate_cost({"prompt_tokens": 100_000, "completion_tokens": 50_000}) == 0.0
+        """A model on your own machine costs nothing per token."""
+        assert is_free_endpoint(base_url) is True
+        assert estimate_cost_usd("llama3.2:1b", {"prompt_tokens": 100_000, "completion_tokens": 50_000}, base_url) == 0.0
 
     def test_unknown_third_party_model_reports_zero_not_a_guess(self) -> None:
         """An unpriced model reports 0.0 rather than the gpt-4o rate."""
-        agent = AITradingAgent(
-            api_key="k", model="llama-3.3-70b", base_url="https://api.groq.com/openai/v1"
-        )
-        assert agent._is_free_endpoint() is False
-        assert agent._estimate_cost({"prompt_tokens": 1_000_000, "completion_tokens": 0}) == 0.0
+        base_url = "https://api.groq.com/openai/v1"
+        assert is_free_endpoint(base_url) is False
+        assert estimate_cost_usd("llama-3.3-70b", {"prompt_tokens": 1_000_000, "completion_tokens": 0}, base_url) == 0.0
 
     def test_known_openai_model_still_prices_correctly(self) -> None:
         """Real OpenAI usage is still costed."""
-        agent = AITradingAgent(api_key="sk-test", model="gpt-4o")
-        assert agent._estimate_cost({"prompt_tokens": 1_000_000, "completion_tokens": 0}) == pytest.approx(2.50)
+        assert estimate_cost_usd("gpt-4o", {"prompt_tokens": 1_000_000, "completion_tokens": 0}) == pytest.approx(2.50)
 
 
 @pytest.mark.unit

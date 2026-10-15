@@ -5,11 +5,34 @@ All configuration is loaded from environment variables via pydantic-settings.
 Never hardcode secrets. Use .env file for local development.
 """
 
+import re
 from functools import lru_cache
 from typing import Literal
 
 from pydantic import Field, computed_field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+_PG_SCHEME = re.compile(r"^postgres(?:ql)?(?:\+\w+)?://")
+
+
+def _to_async_dsn(url: str) -> str:
+    """Normalize a provider DATABASE_URL to an asyncpg DSN.
+
+    Rewrites the scheme to ``postgresql+asyncpg`` and drops libpq-style query
+    params (e.g. ``sslmode=require``) that asyncpg does not accept; asyncpg
+    negotiates TLS automatically against providers that require it.
+    """
+    base = url.split("?", 1)[0]
+    return _PG_SCHEME.sub("postgresql+asyncpg://", base)
+
+
+def _to_sync_dsn(url: str) -> str:
+    """Normalize a provider DATABASE_URL to a sync (psycopg) DSN for Alembic.
+
+    Keeps the query string, so ``sslmode=require`` is preserved for migrations.
+    """
+    return _PG_SCHEME.sub("postgresql://", url)
+
 
 DEFAULT_SECRET_KEY = "change-me-to-a-random-64-char-string"
 DEFAULT_JWT_SECRET_KEY = "change-me-to-a-random-64-char-jwt-secret"
@@ -64,10 +87,17 @@ class Settings(BaseSettings):
     db_pool_recycle_seconds: int = 1800
     db_command_timeout_seconds: int = 30
 
+    # A single DATABASE_URL (as managed providers like Neon/Supabase/Render emit)
+    # overrides the individual POSTGRES_* parts, so the app is deployable on any
+    # PaaS without re-templating the connection components.
+    database_url_override: str = Field(default="", validation_alias="DATABASE_URL")
+
     @computed_field  # type: ignore[prop-decorator]
     @property
     def database_url(self) -> str:
-        """Construct async database URL from individual components."""
+        """Async (asyncpg) database URL; honours a DATABASE_URL override."""
+        if self.database_url_override:
+            return _to_async_dsn(self.database_url_override)
         return (
             f"postgresql+asyncpg://{self.postgres_user}:{self.postgres_password}"
             f"@{self.postgres_host}:{self.postgres_port}/{self.postgres_db}"
@@ -76,7 +106,9 @@ class Settings(BaseSettings):
     @computed_field  # type: ignore[prop-decorator]
     @property
     def database_url_sync(self) -> str:
-        """Construct sync database URL for Alembic migrations."""
+        """Sync database URL for Alembic migrations; honours DATABASE_URL."""
+        if self.database_url_override:
+            return _to_sync_dsn(self.database_url_override)
         return (
             f"postgresql://{self.postgres_user}:{self.postgres_password}"
             f"@{self.postgres_host}:{self.postgres_port}/{self.postgres_db}"
@@ -89,10 +121,16 @@ class Settings(BaseSettings):
     redis_db: int = 0
     redis_max_connections: int = 50
 
+    # A single REDIS_URL (as Upstash/Redis Cloud emit) overrides the parts and,
+    # crucially, allows a TLS scheme (rediss://) that managed Redis requires.
+    redis_url_override: str = Field(default="", validation_alias="REDIS_URL")
+
     @computed_field  # type: ignore[prop-decorator]
     @property
     def redis_url(self) -> str:
-        """Construct Redis URL from individual components."""
+        """Redis URL; honours a REDIS_URL override (supports rediss:// TLS)."""
+        if self.redis_url_override:
+            return self.redis_url_override
         auth = f":{self.redis_password}@" if self.redis_password else ""
         return f"redis://{auth}{self.redis_host}:{self.redis_port}/{self.redis_db}"
 
@@ -106,6 +144,13 @@ class Settings(BaseSettings):
     binance_api_key: str = ""
     binance_secret: str = ""
     binance_testnet: bool = True
+
+    # Host for *reading* public mainnet market data (klines, depth, tickers).
+    # Defaults to Binance's public data mirror rather than api.binance.com
+    # because the main REST API geo-blocks many datacenter regions (HTTP 451),
+    # while data-api.binance.vision serves the same mainnet data unrestricted and
+    # without auth. Override if you deploy somewhere api.binance.com is allowed.
+    binance_market_data_url: str = "https://data-api.binance.vision"
 
     # Hard safety interlock. Placing orders against Binance mainnet requires
     # BOTH binance_testnet=false AND allow_mainnet_trading=true. Defaulting
@@ -166,6 +211,68 @@ class Settings(BaseSettings):
         """
         return bool(self.openai_api_key or self.openai_base_url)
 
+    # ── Agentic LLM runtime ──────────────────────────────────────────────
+    # The tool-calling agent runtime is provider-agnostic. "auto" prefers
+    # Anthropic when an anthropic_api_key is set, otherwise the OpenAI-
+    # compatible backend above (which includes local Ollama / Groq / Gemini).
+    llm_provider: str = "auto"  # auto | anthropic | openai
+    anthropic_api_key: str = ""
+    anthropic_model: str = "claude-sonnet-5-5"
+    # Hard ceiling on tool-calling iterations per agent run, so a model that
+    # keeps requesting tools can never loop forever or exhaust the budget.
+    agent_max_tool_iterations: int = 8
+
+    @field_validator("anthropic_api_key", mode="before")
+    @classmethod
+    def _normalize_anthropic_key(cls, v: object) -> object:
+        """Treat a blank ANTHROPIC_API_KEY as absent, like the OpenAI key."""
+        if isinstance(v, str) and not v.strip():
+            return ""
+        return v
+
+    @property
+    def resolved_llm_provider(self) -> str:
+        """The concrete provider the agent runtime should use.
+
+        Resolves "auto" to a real backend so the rest of the system never has
+        to re-implement the preference order.
+        """
+        choice = (self.llm_provider or "auto").strip().lower()
+        if choice == "auto":
+            return "anthropic" if self.anthropic_api_key else "openai"
+        return choice
+
+    @property
+    def agent_runtime_configured(self) -> bool:
+        """Whether at least one agent-runtime backend can be reached."""
+        return bool(self.anthropic_api_key) or self.ai_provider_configured
+
+    # ── Machine learning / MLOps ─────────────────────────────────────────
+    # Where trained model artifacts and their metadata are written. Batch
+    # training (bash scripts / Celery) writes here; the predict tool reads here.
+    ml_model_dir: str = "./ml_artifacts"
+    # MLflow tracking server URI; when unset, MLflow logs to a local ./mlruns
+    # directory, so experiment tracking works with no server to stand up.
+    mlflow_tracking_uri: str | None = None
+    ml_sequence_length: int = 16
+    ml_default_symbol: str = "BTCUSDT"
+    ml_default_timeframe: str = "1h"
+
+    @field_validator("mlflow_tracking_uri", mode="before")
+    @classmethod
+    def _blank_mlflow_uri_means_default(cls, v: object) -> object:
+        """Treat a blank MLFLOW_TRACKING_URI as unset (local ./mlruns)."""
+        if isinstance(v, str) and not v.strip():
+            return None
+        return v
+
+    # ── Scheduled jobs (serverless cron) ─────────────────────────────────
+    # When set, POST /api/v1/internal/jobs/{name} with header X-Cron-Secret runs
+    # a periodic maintenance job. This lets a free external scheduler (e.g. a
+    # GitHub Actions cron) stand in for an always-on Celery worker on a free
+    # deployment. Leave unset to disable the endpoint entirely.
+    cron_secret: str = ""
+
     # ── Celery ───────────────────────────────────────────────────────────
     celery_broker_url: str = "redis://localhost:6379/1"
     celery_result_backend: str = "redis://localhost:6379/2"
@@ -201,6 +308,12 @@ class Settings(BaseSettings):
     market_timeframes: str = "1m,5m,15m,1h,4h,1d"
 
     market_stream_enabled: bool = False
+    # Run one market-data coverage sync in the background at startup. The live
+    # stream only writes a bar when it closes, so after any downtime the stored
+    # history has a hole until the next scheduled sync — on deployments without
+    # an always-on worker or an external cron, that hole never heals. The sync
+    # fetches only missing/stale pairs, so it is cheap when the DB is current.
+    market_sync_on_startup: bool = True
     # Both default to the market_* lists when left blank, so the live stream,
     # the stored history and the UI all cover exactly the same ground. Streaming
     # every timeframe is what keeps each one current: a closed bar is written
@@ -263,12 +376,16 @@ class Settings(BaseSettings):
             problems.append("SECRET_KEY is still the default value")
         if self.jwt_secret_key == DEFAULT_JWT_SECRET_KEY:
             problems.append("JWT_SECRET_KEY is still the default value")
-        if self.postgres_password == DEFAULT_POSTGRES_PASSWORD:
-            problems.append("POSTGRES_PASSWORD is still the default value")
+        # The component password is only used when there is no DATABASE_URL /
+        # REDIS_URL override. Managed providers (Neon, Upstash, …) embed the
+        # credential in that single connection string, so requiring the
+        # component password there would reject a correctly-configured deploy.
+        if not self.database_url_override and self.postgres_password == DEFAULT_POSTGRES_PASSWORD:
+            problems.append("POSTGRES_PASSWORD is still the default value (or set DATABASE_URL)")
         if self.debug:
             problems.append("DEBUG is enabled")
-        if not self.redis_password:
-            problems.append("REDIS_PASSWORD is empty")
+        if not self.redis_url_override and not self.redis_password:
+            problems.append("REDIS_PASSWORD is empty (or set REDIS_URL)")
 
         if problems:
             raise RuntimeError(

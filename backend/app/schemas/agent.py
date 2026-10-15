@@ -37,3 +37,15 @@ class AgentDecision(BaseModel):
     take_profit: float | None = Field(None, description="Recommended take profit level")
     invalidation_level: float | None = Field(None, description="Price level invalidating signal")
     risk_reward_ratio: float | None = Field(None, description="Calculated Risk to Reward ratio")
+
+
+class OrchestrationResponse(BaseModel):
+    """Result of a multi-agent orchestration run for one symbol."""
+
+    symbol: str
+    decision: dict[str, Any] | None = Field(None, description="Final validated decision")
+    reports: dict[str, str] = Field(default_factory=dict, description="Per-specialist summaries")
+    halted: bool = False
+    market_price: float | None = None
+    executed_order: dict[str, Any] | None = Field(None, description="Paper order placed, if any")
+    log: list[str] = Field(default_factory=list, description="Ordered run log")

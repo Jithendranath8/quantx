@@ -62,7 +62,7 @@ class IndicatorRegistry:
             return {}
 
         latest = df_computed.iloc[-1].to_dict()
-        summary = {}
+        summary: dict[str, Any] = {}
 
         for k, v in latest.items():
             if pd.isna(v):
