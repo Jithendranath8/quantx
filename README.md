@@ -78,6 +78,7 @@ message is a background job that silently disappears.
 | **Live trading** | HMAC-signed Binance SPOT orders, symbol-filter pre-flight, durable order records (testnet by default) |
 | **Kill switch** | Halts first, cancels open orders, verifies each cancellation, reports failures explicitly |
 | **Backtesting** | Event-driven, long/short, intrabar SL/TP, fees, slippage, timeframe-aware Sharpe |
+| **Market making** | Avellaneda–Stoikov inventory-aware quoting simulated over candles — reservation-price skew, hard inventory cap, no look-ahead, spread-capture vs inventory P&L decomposition |
 | **Research** | Walk-forward, grid/random/TPE search, Monte Carlo, look-ahead bias audit, auto-registered against a content hash of the data |
 | **Agentic AI** | Multi-agent LangGraph orchestration over a tool-calling runtime (Claude or any OpenAI-compatible model); deterministic validation on every decision |
 | **ML / MLOps** | PyTorch LSTM + TensorFlow MLP price-direction model, MLflow tracking, exposed to the agents as a prediction tool |
