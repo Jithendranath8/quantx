@@ -24,6 +24,7 @@ from app.core.logging import get_logger
 from app.core.redis import pubsub_context
 from app.core.security import verify_access_token
 from app.websockets.channels import symbol_pattern
+from app.websockets.local_bus import market_bus
 
 logger = get_logger(__name__)
 router = APIRouter(tags=["WebSocket Gateway"])
@@ -89,19 +90,30 @@ async def market_websocket(
         await websocket.close(code=status.WS_1013_TRY_AGAIN_LATER, reason="Gateway at capacity")
         return
 
-    pattern = symbol_pattern(symbol)
     await manager.connect(websocket)
 
     try:
-        async with pubsub_context(pattern) as pubsub:
-            async for message in pubsub.listen():
-                if message.get("type") != "pmessage":
-                    continue
-                data = message["data"]
-                if isinstance(data, bytes):
-                    data = data.decode("utf-8")
-                # A wedged client must not stall the subscription forever.
-                await asyncio.wait_for(websocket.send_text(data), timeout=CLIENT_SEND_TIMEOUT)
+        if get_settings().single_worker_mode:
+            # Stream and gateway share this process: read ticks straight off the
+            # in-process bus, no Redis round-trip (and no Redis quota burn).
+            async with market_bus.subscribe(symbol) as queue:
+                while True:
+                    data = await queue.get()
+                    await asyncio.wait_for(
+                        websocket.send_text(data), timeout=CLIENT_SEND_TIMEOUT
+                    )
+        else:
+            async with pubsub_context(symbol_pattern(symbol)) as pubsub:
+                async for message in pubsub.listen():
+                    if message.get("type") != "pmessage":
+                        continue
+                    data = message["data"]
+                    if isinstance(data, bytes):
+                        data = data.decode("utf-8")
+                    # A wedged client must not stall the subscription forever.
+                    await asyncio.wait_for(
+                        websocket.send_text(data), timeout=CLIENT_SEND_TIMEOUT
+                    )
     except WebSocketDisconnect:
         pass
     except TimeoutError:

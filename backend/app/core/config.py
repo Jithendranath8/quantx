@@ -152,6 +152,15 @@ class Settings(BaseSettings):
     # without auth. Override if you deploy somewhere api.binance.com is allowed.
     binance_market_data_url: str = "https://data-api.binance.vision"
 
+    # WebSocket host for the live market-data feed. Like the REST host above, it
+    # defaults to Binance's public mirror: it is geo-unrestricted (the plain
+    # stream.binance.com is blocked from the same regions as the REST API) and
+    # carries real mainnet ticks, whereas the testnet feed is thin and routinely
+    # stalls — which looks like "a few candles, then nothing" in the UI. Live
+    # data is read-only public information, so this is independent of
+    # BINANCE_TESTNET (which still governs where orders go).
+    binance_market_ws_url: str = "wss://data-stream.binance.vision/stream"
+
     # Hard safety interlock. Placing orders against Binance mainnet requires
     # BOTH binance_testnet=false AND allow_mainnet_trading=true. Defaulting
     # this to false means a misconfigured BINANCE_TESTNET cannot by itself
@@ -306,6 +315,17 @@ class Settings(BaseSettings):
         "BTCUSDT,ETHUSDT,SOLUSDT,BNBUSDT,XRPUSDT,ADAUSDT,AVAXUSDT,DOGEUSDT"
     )
     market_timeframes: str = "1m,5m,15m,1h,4h,1d"
+
+    # One-process deployment (a single uvicorn worker — the free-tier default,
+    # and what BACKEND_WORKERS=1 gives). When true, the live-data path needs no
+    # Redis: the ingestion stream runs directly (no Redis leader election) and
+    # fans ticks out to WebSocket clients in-process, instead of PUBLISHing every
+    # tick to Redis and renewing a Redis lock on a timer. That per-tick +
+    # per-heartbeat traffic alone exhausts a managed free Redis (Upstash), which
+    # both takes Redis down and stops live updates from reaching the browser.
+    # Set false ONLY when running multiple workers/replicas, where Redis is
+    # required to elect one ingestor and bridge ticks across processes.
+    single_worker_mode: bool = True
 
     market_stream_enabled: bool = False
     # Run one market-data coverage sync in the background at startup. The live

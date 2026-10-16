@@ -2,6 +2,7 @@
 QuantX — Unit Tests for market data normalization, caching, and channel naming.
 """
 
+import asyncio
 import json
 import time
 
@@ -9,6 +10,7 @@ import pytest
 
 from app.websockets import channels
 from app.websockets.binance_stream import BinanceStreamManager
+from app.websockets.local_bus import QUEUE_MAXSIZE, LocalMarketBus, market_bus
 from app.websockets.market_data_engine import (
     MarketDataCache,
     MarketDataMetrics,
@@ -174,6 +176,17 @@ class TestStreamManager:
         """Combined streams are served from /stream, not /ws."""
         assert BinanceStreamManager.WS_BASE_URL.endswith("/stream")
 
+    def test_market_ws_defaults_to_the_geofree_public_mirror(self) -> None:
+        """Live data uses the geo-free public mirror, not the thin testnet feed.
+
+        The main stream host is geo-blocked from the same regions as the REST
+        API, and the testnet feed stalls ("a few candles, then nothing"); the
+        public mirror carries real mainnet ticks everywhere.
+        """
+        manager = BinanceStreamManager(symbols=["BTCUSDT"], intervals=["1m"])
+        assert manager.base_url.endswith("/stream")
+        assert "testnet" not in manager.base_url
+
     def test_stream_url_covers_every_symbol_and_interval(self) -> None:
         """Combined streams request all configured pairs at once."""
         manager = BinanceStreamManager(symbols=["BTCUSDT", "ETHUSDT"], intervals=["1m", "5m"])
@@ -182,8 +195,22 @@ class TestStreamManager:
             assert expected in url
 
     @pytest.mark.asyncio
-    async def test_handle_message_publishes_to_the_matching_channel(self) -> None:
-        """A kline is republished on the channel the gateway subscribes to."""
+    async def test_handle_message_fans_out_to_the_local_bus(self) -> None:
+        """Single-worker (the default): a kline is delivered in-process, no Redis."""
+        manager = BinanceStreamManager(symbols=["BTCUSDT"], intervals=["1m"])
+        assert manager._single_worker
+
+        async with market_bus.subscribe("BTCUSDT") as queue:
+            # redis is unused on this path, so None is a valid argument.
+            await manager._handle_message(None, json.dumps({"data": KLINE_EVENT}))
+            payload = await asyncio.wait_for(queue.get(), timeout=1.0)
+
+        assert json.loads(payload)["close"] == 50250.0
+        assert manager.metrics.messages_received == 1
+
+    @pytest.mark.asyncio
+    async def test_handle_message_publishes_to_redis_in_multiworker(self) -> None:
+        """Multi-worker: a kline is republished on the gateway's channel."""
         published: list[tuple[str, str]] = []
 
         class FakeRedis:
@@ -191,6 +218,7 @@ class TestStreamManager:
                 published.append((channel, payload))
 
         manager = BinanceStreamManager(symbols=["BTCUSDT"], intervals=["1m"])
+        manager._single_worker = False
         await manager._handle_message(FakeRedis(), json.dumps({"data": KLINE_EVENT}))
 
         assert len(published) == 1
@@ -201,12 +229,13 @@ class TestStreamManager:
 
     @pytest.mark.asyncio
     async def test_unparseable_message_is_ignored(self) -> None:
-        """Malformed JSON does not kill the stream."""
+        """Malformed JSON does not kill the stream (and never publishes)."""
         class FakeRedis:
             async def publish(self, channel: str, payload: str) -> None:
                 raise AssertionError("should not publish")
 
         manager = BinanceStreamManager(symbols=["BTCUSDT"])
+        manager._single_worker = False
         await manager._handle_message(FakeRedis(), "not json")
 
     @pytest.mark.asyncio
@@ -218,4 +247,38 @@ class TestStreamManager:
 
         broken = {**KLINE_EVENT, "k": {**KLINE_EVENT["k"], "h": "1.0", "l": "9999.0"}}
         manager = BinanceStreamManager(symbols=["BTCUSDT"])
+        manager._single_worker = False
         await manager._handle_message(FakeRedis(), json.dumps(broken))
+
+
+@pytest.mark.unit
+class TestLocalMarketBus:
+    """In-process fan-out used on single-worker deployments."""
+
+    @pytest.mark.asyncio
+    async def test_delivers_to_every_subscriber_for_the_symbol(self) -> None:
+        bus = LocalMarketBus()
+        async with bus.subscribe("BTCUSDT") as a, bus.subscribe("BTCUSDT") as b:
+            bus.publish("BTCUSDT", "tick")
+            assert await asyncio.wait_for(a.get(), timeout=1.0) == "tick"
+            assert await asyncio.wait_for(b.get(), timeout=1.0) == "tick"
+
+    @pytest.mark.asyncio
+    async def test_other_symbols_and_released_subscribers_get_nothing(self) -> None:
+        bus = LocalMarketBus()
+        async with bus.subscribe("ETHUSDT") as q:
+            bus.publish("BTCUSDT", "tick")  # different symbol
+            assert q.empty()
+        # Context exited: the subscriber is gone, so the bus holds no queues.
+        bus.publish("ETHUSDT", "tick")
+        assert bus.subscriber_count == 0
+
+    @pytest.mark.asyncio
+    async def test_full_queue_drops_oldest_rather_than_blocking(self) -> None:
+        bus = LocalMarketBus()
+        async with bus.subscribe("BTCUSDT") as q:
+            for i in range(QUEUE_MAXSIZE + 5):
+                bus.publish("BTCUSDT", str(i))
+            # Never blocked; capped at the queue size, oldest evicted.
+            assert q.qsize() == QUEUE_MAXSIZE
+            assert await asyncio.wait_for(q.get(), timeout=1.0) == "5"
