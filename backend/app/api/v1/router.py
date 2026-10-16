@@ -15,6 +15,7 @@ from app.api.v1.endpoints.internal import router as internal_router
 from app.api.v1.endpoints.journal import router as journal_router
 from app.api.v1.endpoints.live_trading import router as live_trading_router
 from app.api.v1.endpoints.market_data import router as market_data_router
+from app.api.v1.endpoints.market_making import router as market_making_router
 from app.api.v1.endpoints.monitoring import router as monitoring_router
 from app.api.v1.endpoints.orchestrator import router as orchestrator_router
 from app.api.v1.endpoints.paper_trading import router as paper_trading_router
@@ -44,6 +45,7 @@ api_v1_router.include_router(live_trading_router)
 # Backtesting & Research Suite
 api_v1_router.include_router(backtest_router)
 api_v1_router.include_router(research_router)
+api_v1_router.include_router(market_making_router)
 
 # Analytics, Ledger & Journal
 api_v1_router.include_router(analytics_router)
