@@ -20,6 +20,7 @@ from app.core.logging import get_logger
 from app.core.redis import get_redis_client
 from app.websockets.candle_persister import CandlePersister
 from app.websockets.channels import channel_for_event
+from app.websockets.local_bus import market_bus
 from app.websockets.market_data_engine import (
     MarketDataMetrics,
     MarketDataNormalizer,
@@ -53,7 +54,11 @@ class BinanceStreamManager:
         settings = get_settings()
         self.symbols = [s.upper() for s in (symbols or settings.market_stream_symbol_list)]
         self.intervals = intervals or settings.market_stream_interval_list
-        self.base_url = self.WS_TESTNET_URL if settings.binance_testnet else self.WS_BASE_URL
+        # Live data is read-only public info; use the geo-free public mirror
+        # regardless of BINANCE_TESTNET (the testnet feed is thin and stalls).
+        self.base_url = settings.binance_market_ws_url
+        # One-process deploy: fan ticks out in-process instead of via Redis.
+        self._single_worker = settings.single_worker_mode
         self.metrics = MarketDataMetrics()
         # Closed candles go to the database as they arrive; without this the
         # candles table only advances when the ten-minute REST sync runs.
@@ -99,7 +104,8 @@ class BinanceStreamManager:
 
     async def _listen_loop(self) -> None:
         """Reconnecting consume loop with exponential backoff."""
-        redis = await get_redis_client()
+        # In single-worker mode ticks never touch Redis, so do not hold a client.
+        redis = None if self._single_worker else await get_redis_client()
         backoff = 1.0
 
         while self._running:
@@ -157,11 +163,17 @@ class BinanceStreamManager:
         # current as the price ticker beside it.
         await self.persister.offer(event)
 
+        payload = json.dumps(event)
+        if self._single_worker:
+            # Same process as the gateway: hand the tick over directly, no Redis.
+            market_bus.publish(event["symbol"], payload)
+            return
+
         channel = channel_for_event(
             event["symbol"], event["event_type"], event.get("interval")
         )
         try:
-            await redis.publish(channel, json.dumps(event))  # type: ignore[attr-defined]
+            await redis.publish(channel, payload)  # type: ignore[attr-defined]
         except Exception as e:
             logger.error("binance_stream_publish_failed", channel=channel, error=str(e))
 
@@ -190,9 +202,11 @@ async def _stop_owned_stream() -> None:
     if _stream_manager is not None:
         await _stream_manager.stop()
         _stream_manager = None
-    with contextlib.suppress(Exception):
-        redis = await get_redis_client()
-        await redis.delete(STATUS_KEY)
+    # Only the multi-worker path publishes a Redis status record to clear.
+    if not get_settings().single_worker_mode:
+        with contextlib.suppress(Exception):
+            redis = await get_redis_client()
+            await redis.delete(STATUS_KEY)
 
 
 async def start_market_stream() -> None:
@@ -206,6 +220,11 @@ async def start_market_stream() -> None:
     settings = get_settings()
     if not settings.market_stream_enabled:
         logger.info("market_stream_disabled")
+        return
+    if settings.single_worker_mode:
+        # One process owns ingestion unconditionally — no Redis lock to renew.
+        logger.info("market_stream_single_worker")
+        await _start_owned_stream()
         return
     if _leader is None:
         _leader = StreamLeader(
@@ -255,6 +274,10 @@ async def publish_stream_status() -> None:
 
 async def read_stream_status() -> dict[str, Any] | None:
     """Read the owner-published metrics, or None if no owner is reporting."""
+    # Single-worker deploys never publish to Redis; the health endpoints fall
+    # back to this process's own live metrics, which are the authoritative ones.
+    if get_settings().single_worker_mode:
+        return None
     try:
         redis = await get_redis_client()
         raw = await redis.get(STATUS_KEY)
