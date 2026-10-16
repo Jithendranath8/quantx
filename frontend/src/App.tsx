@@ -14,6 +14,7 @@ import LiveTradingPage from './pages/LiveTradingPage';
 import LoginPage from './pages/LoginPage';
 import LogsPage from './pages/LogsPage';
 import MarketDataPage from './pages/MarketDataPage';
+import MarketMakingPage from './pages/MarketMakingPage';
 import OrdersPage from './pages/OrdersPage';
 import PaperTradingPage from './pages/PaperTradingPage';
 import PositionsPage from './pages/PositionsPage';
@@ -52,6 +53,7 @@ export default function App() {
             <Route path="risk" element={<RiskPage />} />
             <Route path="paper-trading" element={<PaperTradingPage />} />
             <Route path="backtest" element={<BacktestPage />} />
+            <Route path="market-making" element={<MarketMakingPage />} />
             <Route path="experiments" element={<ExperimentsPage />} />
             <Route path="journal" element={<TradeJournalPage />} />
             <Route path="live" element={<LiveTradingPage />} />

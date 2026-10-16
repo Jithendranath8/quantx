@@ -207,6 +207,59 @@ export interface BacktestResult {
   trades: Record<string, unknown>[];
 }
 
+export interface MarketMakingParams {
+  symbol: string;
+  timeframe: string;
+  gamma: number;
+  k: number;
+  horizon: number;
+  order_size: number;
+  max_inventory: number;
+  fee_rate: number;
+  vol_window: number;
+}
+
+export interface QuotePoint {
+  timestamp: string;
+  mid: number;
+  bid: number;
+  ask: number;
+  inventory: number;
+  pnl: number;
+}
+
+export interface MarketMakingFill {
+  timestamp: string;
+  side: string;
+  price: number;
+  size: number;
+  edge: number;
+}
+
+export interface MarketMakingMetrics {
+  total_pnl: number;
+  spread_pnl: number;
+  inventory_pnl: number;
+  fees_paid: number;
+  num_fills: number;
+  num_buys: number;
+  num_sells: number;
+  fill_ratio: number;
+  sharpe_ratio: number;
+  max_inventory: number;
+  final_inventory: number;
+  avg_spread_bps: number;
+}
+
+export interface MarketMakingResult {
+  symbol: string;
+  timeframe: string;
+  params: MarketMakingParams;
+  metrics: MarketMakingMetrics;
+  series: QuotePoint[];
+  fills: MarketMakingFill[];
+}
+
 export interface JournalEntry {
   id: string;
   trade_id: string;

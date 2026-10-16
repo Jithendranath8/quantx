@@ -1,7 +1,7 @@
 import { NavLink } from 'react-router-dom';
 import {
   BookOpen, Bot, Cpu, FlaskConical, History, LayoutDashboard,
-  Layers, LineChart, ListOrdered, PieChart, Settings, Shield, Terminal, TrendingUp, Wallet, Zap,
+  Layers, LineChart, ListOrdered, PieChart, Scale, Settings, Shield, Terminal, TrendingUp, Wallet, Zap,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 
@@ -45,6 +45,7 @@ const navGroups: { heading: string; items: NavItem[] }[] = [
     items: [
       { to: '/agent', icon: Bot, label: 'AI Agent' },
       { to: '/backtest', icon: History, label: 'Backtesting' },
+      { to: '/market-making', icon: Scale, label: 'Market Making' },
       { to: '/experiments', icon: FlaskConical, label: 'Research' },
     ],
   },
