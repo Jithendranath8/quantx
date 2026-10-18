@@ -53,6 +53,28 @@ class TestHealthEndpoints:
         assert subsystems["market_data_stream"]["enabled"] is False
 
     @pytest.mark.asyncio
+    async def test_serverless_subsystems_are_not_reported_as_failures(
+        self, client: AsyncClient, auth_headers: dict, stub_binance
+    ) -> None:
+        """On the serverless/free deploy, no Celery worker and no exchange
+        credentials are the intended configuration — not an outage — so neither
+        drags the system into DEGRADED."""
+        response = await client.get("/api/v1/health/system", headers=auth_headers)
+        subsystems = response.json()["subsystems"]
+
+        # No worker running + worker not expected (default) => cron mode, healthy.
+        celery = subsystems["celery_workers"]
+        assert celery["status"] == "CRON_MODE"
+        assert celery["healthy"] is True
+
+        # The execution engine is a config-gated capability, never a failure:
+        # whether credentials are present (READY) or not (NO_CREDENTIALS, idle),
+        # it reports healthy so a paper-only deploy is not flagged as degraded.
+        execution = subsystems["execution_engine"]
+        assert execution["status"] in {"READY", "NO_CREDENTIALS"}
+        assert execution["healthy"] is True
+
+    @pytest.mark.asyncio
     async def test_system_health_reflects_a_tripped_breaker(
         self, client: AsyncClient, auth_headers: dict, stub_binance
     ) -> None:
