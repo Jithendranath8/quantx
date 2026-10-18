@@ -383,34 +383,48 @@ class Settings(BaseSettings):
         return self.app_env == "production"
 
     def validate_production_safety(self) -> None:
-        """Fail fast when production is running with development defaults.
+        """Fail fast when a deployed service is running with insecure defaults.
+
+        The token-signing secrets are checked on EVERY non-development
+        environment, not only production: a deployment that forgets to set
+        APP_ENV must still never sign JWTs (or guard /metrics) with the key
+        published as the default in this repo. The remaining checks (debug,
+        datastore passwords) are production-only.
 
         Raises:
             RuntimeError: If any insecure default is still in place.
         """
-        if not self.is_production:
+        # Local development may run on the shipped defaults; nothing reachable may.
+        if self.app_env == "development":
             return
 
         problems: list[str] = []
+
+        # A default or shared signing secret lets anyone forge a valid token for
+        # any known user id — this is the highest-impact misconfiguration, so it
+        # is enforced regardless of which non-dev env this is.
         if self.secret_key == DEFAULT_SECRET_KEY:
             problems.append("SECRET_KEY is still the default value")
         if self.jwt_secret_key == DEFAULT_JWT_SECRET_KEY:
             problems.append("JWT_SECRET_KEY is still the default value")
-        # The component password is only used when there is no DATABASE_URL /
-        # REDIS_URL override. Managed providers (Neon, Upstash, …) embed the
-        # credential in that single connection string, so requiring the
-        # component password there would reject a correctly-configured deploy.
-        if not self.database_url_override and self.postgres_password == DEFAULT_POSTGRES_PASSWORD:
-            problems.append("POSTGRES_PASSWORD is still the default value (or set DATABASE_URL)")
-        if self.debug:
-            problems.append("DEBUG is enabled")
-        if not self.redis_url_override and not self.redis_password:
-            problems.append("REDIS_PASSWORD is empty (or set REDIS_URL)")
+        if self.jwt_secret_key == self.secret_key:
+            problems.append("JWT_SECRET_KEY must differ from SECRET_KEY")
+
+        if self.is_production:
+            # The component password is only used when there is no DATABASE_URL /
+            # REDIS_URL override. Managed providers (Neon, Upstash, …) embed the
+            # credential in that single connection string, so requiring the
+            # component password there would reject a correctly-configured deploy.
+            if not self.database_url_override and self.postgres_password == DEFAULT_POSTGRES_PASSWORD:
+                problems.append("POSTGRES_PASSWORD is still the default value (or set DATABASE_URL)")
+            if self.debug:
+                problems.append("DEBUG is enabled")
+            if not self.redis_url_override and not self.redis_password:
+                problems.append("REDIS_PASSWORD is empty (or set REDIS_URL)")
 
         if problems:
             raise RuntimeError(
-                "Refusing to start in production with insecure configuration: "
-                + "; ".join(problems)
+                "Refusing to start with insecure configuration: " + "; ".join(problems)
             )
 
 

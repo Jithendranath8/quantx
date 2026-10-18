@@ -216,21 +216,23 @@ class RefreshTokenRepository:
         result = await self._session.execute(stmt)
         return result.scalar_one_or_none()
 
-    async def revoke(self, token: str) -> bool:
+    async def revoke(self, token: str, user_id: str | None = None) -> bool:
         """Revoke a specific refresh token.
 
         Args:
             token: The raw refresh token string.
+            user_id: When provided, scope the revocation to this owner so a
+                caller cannot revoke another user's token even if they supply
+                its raw value.
 
         Returns:
             True if the token was found and revoked.
         """
         token_hash = self._hash_token(token)
-        stmt = (
-            update(RefreshToken)
-            .where(RefreshToken.token_hash == token_hash)
-            .values(is_revoked=True, updated_at=datetime.now(UTC))
-        )
+        stmt = update(RefreshToken).where(RefreshToken.token_hash == token_hash)
+        if user_id is not None:
+            stmt = stmt.where(RefreshToken.user_id == uuid.UUID(user_id))
+        stmt = stmt.values(is_revoked=True, updated_at=datetime.now(UTC))
         result = await self._session.execute(stmt)
         await self._session.flush()
         return bool(result.rowcount > 0)  # type: ignore[attr-defined]  # DML execute returns CursorResult (has rowcount)

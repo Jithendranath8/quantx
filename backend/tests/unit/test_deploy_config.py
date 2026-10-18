@@ -8,7 +8,14 @@ asyncpg and TLS passthrough for Redis.
 
 import pytest
 
-from app.core.config import DEFAULT_POSTGRES_PASSWORD, Settings, _to_async_dsn, _to_sync_dsn
+from app.core.config import (
+    DEFAULT_JWT_SECRET_KEY,
+    DEFAULT_POSTGRES_PASSWORD,
+    DEFAULT_SECRET_KEY,
+    Settings,
+    _to_async_dsn,
+    _to_sync_dsn,
+)
 
 
 def _prod_settings(**overrides: object) -> Settings:
@@ -94,3 +101,32 @@ def test_production_safety_rejects_empty_redis_without_override() -> None:
     )
     with pytest.raises(RuntimeError, match="REDIS_PASSWORD"):
         s.validate_production_safety()
+
+
+def test_default_signing_secret_rejected_outside_development() -> None:
+    # A deployment that forgets APP_ENV=production (lands on "staging") must
+    # still never sign JWTs with the repo-default key.
+    s = Settings(  # type: ignore[call-arg]
+        app_env="staging",
+        secret_key="x" * 48,
+        jwt_secret_key=DEFAULT_JWT_SECRET_KEY,
+    )
+    with pytest.raises(RuntimeError, match="JWT_SECRET_KEY is still the default"):
+        s.validate_production_safety()
+
+
+def test_jwt_secret_must_differ_from_secret_key() -> None:
+    same = "s" * 48
+    s = Settings(app_env="production", secret_key=same, jwt_secret_key=same)  # type: ignore[call-arg]
+    with pytest.raises(RuntimeError, match="must differ"):
+        s.validate_production_safety()
+
+
+def test_development_allows_the_shipped_defaults() -> None:
+    # Local dev may run on defaults; the guard must not fire there.
+    s = Settings(  # type: ignore[call-arg]
+        app_env="development",
+        secret_key=DEFAULT_SECRET_KEY,
+        jwt_secret_key=DEFAULT_JWT_SECRET_KEY,
+    )
+    s.validate_production_safety()  # must not raise
