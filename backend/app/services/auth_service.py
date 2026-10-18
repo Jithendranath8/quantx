@@ -259,7 +259,7 @@ class AuthService:
         Returns:
             Success message.
         """
-        await self._token_repo.revoke(refresh_token)
+        await self._token_repo.revoke(refresh_token, user_id=user_id)
 
         await self._audit_repo.log(
             action="user.logout",

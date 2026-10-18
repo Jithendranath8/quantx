@@ -66,9 +66,18 @@ exposes a secret-gated cron endpoint so no background worker is needed.
    `SECRET_KEY`, `JWT_SECRET_KEY`, `CRON_SECRET`, `DATABASE_URL`, `REDIS_URL`,
    `ALLOWED_ORIGINS` (your frontend URL), and a free AI provider
    (`OPENAI_BASE_URL`/`OPENAI_MODEL`/`OPENAI_API_KEY` for Groq/Gemini, or
-   `ANTHROPIC_API_KEY`).
+   `ANTHROPIC_API_KEY`). `JWT_SECRET_KEY` must differ from `SECRET_KEY`, and
+   neither may be a repo default — the app refuses to boot otherwise.
 4. Deploy, then under **Settings → Networking → Public Networking** click
    **Generate Domain**. Note the URL, e.g. `https://quantx-api.up.railway.app`.
+
+   > **Rate-limiter IP trust.** The container only reads the real client IP from
+   > `X-Forwarded-For` when the immediate peer is in `FORWARDED_ALLOW_IPS`
+   > (default `127.0.0.1` — trust nothing, the safe default). Behind a platform
+   > edge that sets XFF (Railway, Cloud Run), the per-IP auth throttle otherwise
+   > coalesces every client onto the edge's IP. If you need per-client limiting,
+   > set `FORWARDED_ALLOW_IPS` to your edge's address range — **never `*`**,
+   > which would let any caller spoof their IP and defeat the brute-force throttle.
 
 ### 4. Frontend — Cloudflare Pages
 1. New Pages project from this repo. Build command `npm ci && npm run build`,

@@ -86,9 +86,12 @@ class BinanceClient:
         # most datacenter regions.
         self.market_data_base_url = settings.binance_market_data_url
 
+        # The API key is NOT a global header: it is attached per-request only to
+        # signed calls (see _request). Otherwise it would ride along on every
+        # public market-data read, which goes to the operator-configurable
+        # market-data / futures hosts — repointing those must never leak the
+        # live trading credential to a third-party endpoint.
         headers = {"Accept": "application/json"}
-        if self.api_key:
-            headers["X-MBX-APIKEY"] = self.api_key
 
         self._client = httpx.AsyncClient(
             base_url=self.base_url,
@@ -166,6 +169,10 @@ class BinanceClient:
         params = {k: v for k, v in (params or {}).items() if v is not None}
         url = path if base_url is None else f"{base_url.rstrip('/')}{path}"
 
+        # Attach the API key only on signed (account/trading) calls, and only to
+        # the client's own trading host — never on public data reads.
+        req_headers = {"X-MBX-APIKEY": self.api_key} if signed and self.api_key else None
+
         if signed:
             self._require_credentials()
             params["timestamp"] = int(time.time() * 1000)
@@ -175,7 +182,7 @@ class BinanceClient:
         last_error: Exception | None = None
         for attempt in range(self.MAX_RETRIES):
             try:
-                response = await self._client.request(method, url, params=params)
+                response = await self._client.request(method, url, params=params, headers=req_headers)
 
                 if response.status_code in _RETRYABLE_STATUS:
                     retry_after = float(response.headers.get("Retry-After", 2**attempt))

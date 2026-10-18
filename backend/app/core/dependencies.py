@@ -100,8 +100,10 @@ class RateLimiter:
     Usage:
         @router.post("/expensive", dependencies=[Depends(RateLimiter("backtest", 5))])
 
-    Requests are counted per client IP per scope. Redis failures fail *open*
-    (the request proceeds) so that a cache outage cannot take down the API.
+    Requests are counted per client IP per scope. On a Redis failure, non-auth
+    scopes fail *open* (the request proceeds) so a cache outage cannot take the
+    API down, while ``auth*`` scopes fail *closed* so the brute-force throttle is
+    never silently removed.
     """
 
     def __init__(self, scope: str, max_requests: int, window_seconds: int = 60) -> None:
@@ -123,6 +125,16 @@ class RateLimiter:
             )
         except Exception as exc:
             logger.warning("rate_limit_check_failed", scope=self.scope, error=str(exc))
+            # Authentication throttles fail CLOSED: a Redis outage must not
+            # silently open an unlimited password brute-force / bcrypt-CPU
+            # window on login/register. Every other scope fails open so a cache
+            # blip cannot take the whole API down.
+            if self.scope.startswith("auth"):
+                raise RateLimitError(
+                    f"Rate limiting is temporarily unavailable for {self.scope}; "
+                    "please retry shortly.",
+                    retry_after_seconds=self.window_seconds,
+                ) from exc
             return
 
         if limited:

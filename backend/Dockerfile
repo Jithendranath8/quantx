@@ -62,9 +62,14 @@ ENV BACKEND_WORKERS=4
 # step. It is idempotent: a no-op once the DB is already at head. Single replica
 # only; if you scale out, move this back to a dedicated one-shot release step.
 #
-# --proxy-headers plus a trusted-host list makes X-Forwarded-For usable behind
-# the nginx frontend without letting arbitrary clients spoof their IP.
+# --proxy-headers lets uvicorn read the real client IP from X-Forwarded-For, but
+# ONLY from peers in FORWARDED_ALLOW_IPS. That header is client-controlled, so
+# trusting it from everyone ('*') let any caller spoof their IP and defeat the
+# per-IP auth rate limiter / forge audit IPs. It therefore defaults to
+# 127.0.0.1 (trust nothing by default); set FORWARDED_ALLOW_IPS to your real
+# edge/proxy address(es) when the platform's load balancer sets XFF.
 # Bind to $PORT when the platform provides one (Railway, Cloud Run, Fly, …);
 # fall back to 8000 for docker-compose. Scale-to-zero free tiers are happiest
 # with a single worker, so BACKEND_WORKERS defaults low and stays configurable.
-CMD ["sh", "-c", "alembic upgrade head && exec uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000} --workers ${BACKEND_WORKERS} --loop uvloop --proxy-headers --forwarded-allow-ips='*'"]
+ENV FORWARDED_ALLOW_IPS=127.0.0.1
+CMD ["sh", "-c", "alembic upgrade head && exec uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000} --workers ${BACKEND_WORKERS} --loop uvloop --proxy-headers --forwarded-allow-ips=\"${FORWARDED_ALLOW_IPS}\""]

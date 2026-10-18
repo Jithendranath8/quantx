@@ -212,3 +212,25 @@ class TestMarketDataHostRouting:
             async with BinanceClient(testnet=True) as client:
                 await client.get_exchange_info()
         assert request.await_args.args[1] == "/api/v3/exchangeInfo"
+
+
+@pytest.mark.unit
+class TestApiKeyHeaderScoping:
+    """The trading API key must ride only on signed requests, never on the
+    public market-data reads that may target an operator-configurable host."""
+
+    @pytest.mark.asyncio
+    async def test_public_request_carries_no_api_key(self) -> None:
+        with patch("httpx.AsyncClient.request", new_callable=AsyncMock) as request:
+            request.return_value = mock_response([KLINE_ROW])
+            async with BinanceClient(api_key="k", api_secret="s", testnet=True) as client:
+                await client.get_klines("BTCUSDT", "1h")
+        assert request.await_args.kwargs.get("headers") is None
+
+    @pytest.mark.asyncio
+    async def test_signed_request_carries_the_api_key(self) -> None:
+        with patch("httpx.AsyncClient.request", new_callable=AsyncMock) as request:
+            request.return_value = mock_response({"balances": []})
+            async with BinanceClient(api_key="k", api_secret="s", testnet=True) as client:
+                await client.get_account()
+        assert request.await_args.kwargs.get("headers") == {"X-MBX-APIKEY": "k"}
