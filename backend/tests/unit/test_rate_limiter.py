@@ -1,8 +1,9 @@
 """
 QuantX — Rate limiter fail-mode tests.
 
-A Redis outage must not silently remove the brute-force throttle on the auth
-endpoints (fail closed), while other scopes stay available (fail open).
+Rate limiting is best-effort: when Redis is unavailable (outage, or an
+exhausted free-tier command quota) every scope — including auth — must fail
+OPEN so a cache problem can never lock users out of login or take the API down.
 """
 
 from types import SimpleNamespace
@@ -12,7 +13,6 @@ import pytest
 from starlette.requests import Request
 
 from app.core.dependencies import RateLimiter
-from app.core.exceptions import RateLimitError
 
 
 def _request() -> Request:
@@ -22,7 +22,10 @@ def _request() -> Request:
 @pytest.mark.unit
 class TestRateLimiterFailMode:
     @pytest.mark.asyncio
-    async def test_auth_scope_fails_closed_on_redis_error(self) -> None:
+    @pytest.mark.parametrize("scope", ["auth_login", "auth_register", "backtest_run"])
+    async def test_every_scope_fails_open_on_redis_error(self, scope: str) -> None:
+        # A Redis failure (here an exhausted quota) must never raise — the
+        # request proceeds, including for the auth endpoints.
         with (
             patch(
                 "app.core.dependencies.get_settings",
@@ -30,23 +33,7 @@ class TestRateLimiterFailMode:
             ),
             patch(
                 "app.core.dependencies.get_redis_client",
-                new=AsyncMock(side_effect=RuntimeError("redis down")),
-            ),
-            pytest.raises(RateLimitError),
-        ):
-            await RateLimiter("auth_login", max_requests=5)(_request())
-
-    @pytest.mark.asyncio
-    async def test_non_auth_scope_fails_open_on_redis_error(self) -> None:
-        with (
-            patch(
-                "app.core.dependencies.get_settings",
-                return_value=SimpleNamespace(rate_limit_enabled=True),
-            ),
-            patch(
-                "app.core.dependencies.get_redis_client",
-                new=AsyncMock(side_effect=RuntimeError("redis down")),
+                new=AsyncMock(side_effect=RuntimeError("max requests limit exceeded")),
             ),
         ):
-            # Must NOT raise — a cache blip cannot take the API down.
-            await RateLimiter("backtest_run", max_requests=5)(_request())
+            await RateLimiter(scope, max_requests=5)(_request())  # must not raise

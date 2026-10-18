@@ -84,12 +84,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         await redis.ping()
         logger.info("redis_connected", host=settings.redis_host)
     except Exception as exc:
-        # Redis backs rate limiting and the WebSocket fan-out. In production a
-        # missing cache is a misconfiguration worth failing on rather than
-        # discovering later under load.
+        # Redis is best-effort, not a hard dependency: rate limiting fails open
+        # without it and the live WebSocket feed now fans out in-process (see
+        # single_worker_mode), so no core path needs it. A transient outage or
+        # an exhausted free-tier quota must not refuse the boot or block a
+        # deploy — log and continue; the health endpoints report the real state.
         logger.error("redis_connection_failed", error=str(exc))
-        if settings.is_production:
-            raise RuntimeError(f"Redis is unreachable at startup: {exc}") from exc
 
     await start_market_stream()
 

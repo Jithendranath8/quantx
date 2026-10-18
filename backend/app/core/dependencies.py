@@ -100,10 +100,10 @@ class RateLimiter:
     Usage:
         @router.post("/expensive", dependencies=[Depends(RateLimiter("backtest", 5))])
 
-    Requests are counted per client IP per scope. On a Redis failure, non-auth
-    scopes fail *open* (the request proceeds) so a cache outage cannot take the
-    API down, while ``auth*`` scopes fail *closed* so the brute-force throttle is
-    never silently removed.
+    Requests are counted per client IP per scope. Any Redis failure fails *open*
+    (the request proceeds) so a cache outage or an exhausted free-tier quota can
+    never take the API down or lock users out — rate limiting is a protective
+    layer, not a hard dependency of the request path.
     """
 
     def __init__(self, scope: str, max_requests: int, window_seconds: int = 60) -> None:
@@ -124,17 +124,14 @@ class RateLimiter:
                 key, self.max_requests, self.window_seconds
             )
         except Exception as exc:
+            # Rate limiting is best-effort protection; its backing store must
+            # never block a real user. If Redis is unavailable (outage, or a
+            # free-tier command-quota that is exhausted) the check is skipped —
+            # fail open — and logged. A cache problem must not lock anyone out
+            # of login or take the API down. Brute-force risk during an outage
+            # is mitigated by slow bcrypt hashing and is a far smaller harm than
+            # denying every legitimate request.
             logger.warning("rate_limit_check_failed", scope=self.scope, error=str(exc))
-            # Authentication throttles fail CLOSED: a Redis outage must not
-            # silently open an unlimited password brute-force / bcrypt-CPU
-            # window on login/register. Every other scope fails open so a cache
-            # blip cannot take the whole API down.
-            if self.scope.startswith("auth"):
-                raise RateLimitError(
-                    f"Rate limiting is temporarily unavailable for {self.scope}; "
-                    "please retry shortly.",
-                    retry_after_seconds=self.window_seconds,
-                ) from exc
             return
 
         if limited:
