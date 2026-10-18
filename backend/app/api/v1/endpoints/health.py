@@ -125,9 +125,18 @@ async def system_health_center(user: CurrentUser, db: DBSession) -> dict[str, An
 
     # ── Celery workers (real broker ping) ────────────────────────────
     celery_ok, celery_detail = await _celery_status()
+    if celery_ok:
+        celery_status, celery_healthy = "ACTIVE", True
+    elif not settings.celery_worker_expected:
+        # Serverless / free-tier deploy: periodic jobs run via the scheduled
+        # cron endpoint, not an always-on worker. No worker is the intended
+        # design here, so report it as such rather than as an outage.
+        celery_status, celery_healthy = "CRON_MODE", True
+    else:
+        celery_status, celery_healthy = "UNAVAILABLE", False
     subsystems["celery_workers"] = {
-        "status": "ACTIVE" if celery_ok else "UNAVAILABLE",
-        "healthy": celery_ok,
+        "status": celery_status,
+        "healthy": celery_healthy,
         **celery_detail,
     }
 
@@ -175,11 +184,18 @@ async def system_health_center(user: CurrentUser, db: DBSession) -> dict[str, An
     subsystems["ai_service"] = await _ai_service_status(db, settings)
 
     # ── Execution engine ─────────────────────────────────────────────
+    # No exchange credentials is a safe, valid configuration — the platform runs
+    # paper-only without them and live trading is gated behind explicit flags —
+    # so the engine is reported healthy (idle), not as a failure. It only trades
+    # live when credentials AND the two mainnet flags are all set.
     creds = bool(settings.binance_api_key and settings.binance_secret)
     subsystems["execution_engine"] = {
         "status": "READY" if creds else "NO_CREDENTIALS",
-        "healthy": creds,
+        "healthy": True,
         "mainnet_trading_enabled": settings.mainnet_trading_enabled,
+        "detail": None
+        if creds
+        else "No exchange credentials set; live execution disabled (paper trading only).",
     }
 
     # ── Risk engine (persisted state) ────────────────────────────────

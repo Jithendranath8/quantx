@@ -285,6 +285,13 @@ class Settings(BaseSettings):
     # ── Celery ───────────────────────────────────────────────────────────
     celery_broker_url: str = "redis://localhost:6379/1"
     celery_result_backend: str = "redis://localhost:6379/2"
+    # Whether an always-on Celery worker is part of this deployment. On the
+    # free-tier / serverless deploy it is not — a scheduled cron drives the
+    # periodic jobs instead — so the absence of a worker is the intended design,
+    # not an outage, and the health check reports "cron mode" rather than a
+    # failure. Set true for a full stack that runs a dedicated worker, so a
+    # genuinely-down worker is surfaced.
+    celery_worker_expected: bool = False
 
     # ── Rate Limiting ────────────────────────────────────────────────────
     rate_limit_enabled: bool = True
