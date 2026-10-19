@@ -45,6 +45,23 @@ export interface Orderbook {
   asks: [string, string][];
 }
 
+export interface MicrostructureMetrics {
+  symbol: string;
+  best_bid: number;
+  best_ask: number;
+  mid: number;
+  microprice: number;
+  spread: number;
+  spread_bps: number;
+  imbalance: number;
+  bid_depth: number;
+  ask_depth: number;
+  bid_levels: number;
+  ask_levels: number;
+  levels: number;
+  depth_bps: number;
+}
+
 export interface Signal {
   action: 'BUY' | 'SELL' | 'WAIT';
   symbol: string;

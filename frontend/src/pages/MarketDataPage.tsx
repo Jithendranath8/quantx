@@ -1,11 +1,11 @@
 import { useEffect, useState } from 'react';
-import { RefreshCw, TrendingUp } from 'lucide-react';
+import { Activity, RefreshCw, TrendingUp } from 'lucide-react';
 
 import api from '../lib/api';
 import { formatDateTime, formatNumber, formatSignedPercent } from '../lib/format';
 import { useAction, useApi, usePolling } from '../lib/useApi';
 import { useMarketStream } from '../lib/useMarketStream';
-import type { Candle, MarketCoverage, Orderbook, Ticker } from '../lib/types';
+import type { Candle, MarketCoverage, MicrostructureMetrics, Orderbook, Ticker } from '../lib/types';
 import {
   AsyncSection,
   Badge,
@@ -83,6 +83,10 @@ export default function MarketDataPage() {
     () => api.get<Orderbook>('/market/orderbook', { params: { symbol, limit: 10 } }).then((r) => r.data),
     [symbol],
   );
+  const micro = useApi<MicrostructureMetrics>(
+    () => api.get<MicrostructureMetrics>('/market/microstructure', { params: { symbol } }).then((r) => r.data),
+    [symbol],
+  );
 
   // Polling is the fallback. When the WebSocket is delivering ticks the price
   // is already live, so only the depth snapshot needs refreshing.
@@ -90,6 +94,7 @@ export default function MarketDataPage() {
     () => {
       if (live.status !== 'open') ticker.reload();
       book.reload();
+      micro.reload();
     },
     15_000,
   );
@@ -174,6 +179,41 @@ export default function MarketDataPage() {
           value={ticker.data?.volume ? formatNumber(Number(ticker.data.volume), 0) : '—'}
         />
       </div>
+
+      <Card title={`Microstructure · ${symbol}`} icon={<Activity className="w-4 h-4 text-cyan-400" />}>
+        <AsyncSection state={micro}>
+          {(m) => (
+            <div className="p-5 space-y-4">
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                <StatTile label="Microprice" value={formatNumber(m.microprice)} sub={`mid ${formatNumber(m.mid)}`} />
+                <StatTile label="Spread" value={`${formatNumber(m.spread_bps, 2)} bps`} sub={formatNumber(m.spread)} />
+                <StatTile
+                  label="Imbalance"
+                  value={formatNumber(m.imbalance, 3)}
+                  sub={`top ${m.levels} levels`}
+                  tone={m.imbalance >= 0 ? 'positive' : 'negative'}
+                />
+                <StatTile
+                  label={`Depth ±${m.depth_bps}bps`}
+                  value={`${formatNumber(m.bid_depth, 2)} / ${formatNumber(m.ask_depth, 2)}`}
+                  sub="bid / ask"
+                />
+              </div>
+              <div>
+                <div className="flex justify-between text-xs text-slate-500 mb-1">
+                  <span className="text-emerald-400">bids</span>
+                  <span>order-book imbalance</span>
+                  <span className="text-red-400">asks</span>
+                </div>
+                <div className="flex h-2.5 rounded-full overflow-hidden bg-slate-800">
+                  <div className="bg-emerald-500/70" style={{ width: `${((1 + m.imbalance) / 2) * 100}%` }} />
+                  <div className="bg-red-500/70" style={{ width: `${((1 - m.imbalance) / 2) * 100}%` }} />
+                </div>
+              </div>
+            </div>
+          )}
+        </AsyncSection>
+      </Card>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <Card title={`Candles · ${symbol} ${timeframe}`} className="lg:col-span-2">
