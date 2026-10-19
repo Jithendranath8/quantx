@@ -30,7 +30,8 @@ const MA_P = [7, 25, 99];
 const VOLMA_P = [5, 10];
 
 const baseLayout = {
-  layout: { background: { type: ColorType.Solid, color: 'transparent' }, textColor: '#94a3b8', fontSize: 11 },
+  // attributionLogo: false removes the default "TradingView" logo in the corner.
+  layout: { background: { type: ColorType.Solid, color: 'transparent' }, textColor: '#94a3b8', fontSize: 11, attributionLogo: false },
   grid: { vertLines: { color: 'rgba(148,163,184,0.05)' }, horzLines: { color: 'rgba(148,163,184,0.05)' } },
   rightPriceScale: { borderColor: 'rgba(148,163,184,0.12)' },
   timeScale: { timeVisible: true, borderColor: 'rgba(148,163,184,0.12)' },
@@ -89,7 +90,18 @@ export default function ProChart({ candles, live }: { candles: Candle[]; live?: 
   // ── Build the four synced charts once ──────────────────────────────
   useEffect(() => {
     if (!mainEl.current || !volEl.current || !macdEl.current || !rsiEl.current) return;
-    const main = createChart(mainEl.current, baseLayout);
+    const main = createChart(mainEl.current, {
+      ...baseLayout,
+      // Our own watermark in place of the library's attribution.
+      watermark: {
+        visible: true,
+        text: 'QuantX',
+        color: 'rgba(148,163,184,0.07)',
+        fontSize: 52,
+        horzAlign: 'center',
+        vertAlign: 'center',
+      },
+    });
     const vol = createChart(volEl.current, baseLayout);
     const macd = createChart(macdEl.current, baseLayout);
     const rsi = createChart(rsiEl.current, baseLayout);
@@ -191,30 +203,32 @@ export default function ProChart({ candles, live }: { candles: Candle[]; live?: 
     <div className="space-y-px">
       {/* Candle pane + boxed OHLCV tooltip + MA legend */}
       <div className="relative">
+        {/* MA readout: always on, like Binance's top legend line. */}
         {meta && (
-          <>
-            <div className="absolute left-2 top-1.5 z-10 flex flex-wrap gap-x-3 text-[11px] font-mono">
-              {MA_P.map((p, k) => (
-                <span key={p} style={{ color: C_MA[k] }}>MA({p}): {maVal(meta.ma[k])}</span>
-              ))}
-            </div>
-            <div className="absolute left-2 top-7 z-10 w-36 rounded-md border border-slate-700/60 bg-slate-900/85 p-2 text-[11px] font-mono text-slate-400 backdrop-blur-sm">
-              {([
-                ['Time', new Date(meta.times[i] * 1000).toLocaleString(undefined, { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })],
-                ['Open', fmt(meta.o[i])],
-                ['High', fmt(meta.h[i])],
-                ['Low', fmt(meta.l[i])],
-                ['Close', fmt(meta.c[i])],
-              ] as [string, string][]).map(([k, val]) => (
-                <div key={k} className="flex justify-between gap-2"><span>{k}</span><span className="text-slate-200">{val}</span></div>
-              ))}
-              <div className="flex justify-between gap-2"><span>Chg</span><span className={chg >= 0 ? 'text-emerald-400' : 'text-red-400'}>{chg >= 0 ? '+' : ''}{fmt(chg)}</span></div>
-              <div className="flex justify-between gap-2"><span>%Chg</span><span className={pct >= 0 ? 'text-emerald-400' : 'text-red-400'}>{pct >= 0 ? '+' : ''}{fmt(pct)}%</span></div>
-              <div className="flex justify-between gap-2"><span>Range</span><span className="text-slate-300">{fmt(rangePct)}%</span></div>
-              <div className="flex justify-between gap-2"><span>Vol</span><span className="text-slate-300">{fmt(meta.v[i])}</span></div>
-              <div className="flex justify-between gap-2"><span>Txn</span><span className="text-slate-300">{compact(meta.txn[i])}</span></div>
-            </div>
-          </>
+          <div className="absolute left-2 top-1.5 z-10 flex flex-wrap gap-x-3 text-[11px] font-mono">
+            {MA_P.map((p, k) => (
+              <span key={p} style={{ color: C_MA[k] }}>MA({p}): {maVal(meta.ma[k])}</span>
+            ))}
+          </div>
+        )}
+        {/* Boxed OHLCV tooltip: only while the crosshair is over a candle. */}
+        {meta && hover !== null && (
+          <div className="absolute left-2 top-7 z-10 w-36 rounded-md border border-slate-700/60 bg-slate-900/90 p-2 text-[11px] font-mono text-slate-400 backdrop-blur-sm">
+            {([
+              ['Time', new Date(meta.times[i] * 1000).toLocaleString(undefined, { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })],
+              ['Open', fmt(meta.o[i])],
+              ['High', fmt(meta.h[i])],
+              ['Low', fmt(meta.l[i])],
+              ['Close', fmt(meta.c[i])],
+            ] as [string, string][]).map(([k, val]) => (
+              <div key={k} className="flex justify-between gap-2"><span>{k}</span><span className="text-slate-200">{val}</span></div>
+            ))}
+            <div className="flex justify-between gap-2"><span>Chg</span><span className={chg >= 0 ? 'text-emerald-400' : 'text-red-400'}>{chg >= 0 ? '+' : ''}{fmt(chg)}</span></div>
+            <div className="flex justify-between gap-2"><span>%Chg</span><span className={pct >= 0 ? 'text-emerald-400' : 'text-red-400'}>{pct >= 0 ? '+' : ''}{fmt(pct)}%</span></div>
+            <div className="flex justify-between gap-2"><span>Range</span><span className="text-slate-300">{fmt(rangePct)}%</span></div>
+            <div className="flex justify-between gap-2"><span>Vol</span><span className="text-slate-300">{fmt(meta.v[i])}</span></div>
+            <div className="flex justify-between gap-2"><span>Txn</span><span className="text-slate-300">{compact(meta.txn[i])}</span></div>
+          </div>
         )}
         <div ref={mainEl} className="h-72 w-full" />
       </div>
