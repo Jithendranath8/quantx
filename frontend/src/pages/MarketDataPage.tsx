@@ -6,6 +6,8 @@ import { formatDateTime, formatNumber, formatSignedPercent } from '../lib/format
 import { useAction, useApi, usePolling } from '../lib/useApi';
 import { useMarketStream } from '../lib/useMarketStream';
 import { computeMicrostructure } from '../lib/microstructure';
+import CandlestickChart, { type LiveCandle } from '../components/CandlestickChart';
+import DepthChart from '../components/DepthChart';
 import type { Candle, MarketCoverage, MicrostructureMetrics, Orderbook, Ticker } from '../lib/types';
 import {
   AsyncSection,
@@ -16,9 +18,6 @@ import {
   PageHeader,
   Select,
   StatTile,
-  TableWrap,
-  Td,
-  Th,
 } from '../components/ui';
 
 interface StreamStatusResponse {
@@ -33,6 +32,8 @@ export default function MarketDataPage() {
   const [timeframe, setTimeframe] = useState('1h');
   const [livePrice, setLivePrice] = useState<number | null>(null);
   const [liveMicro, setLiveMicro] = useState<MicrostructureMetrics | null>(null);
+  const [liveBook, setLiveBook] = useState<{ bids: [number, number][]; asks: [number, number][] } | null>(null);
+  const [liveCandle, setLiveCandle] = useState<LiveCandle | null>(null);
 
   // Only open a socket when the server is actually ingesting.
   const stream = useApi<StreamStatusResponse>(
@@ -45,10 +46,22 @@ export default function MarketDataPage() {
     onEvent: (event) => {
       if (event.event_type === 'kline' && typeof event.close === 'number') {
         setLivePrice(event.close);
+        // Live-update the chart's forming bar, but only for the timeframe shown
+        // (the stream carries every interval for the symbol).
+        if (event.interval === timeframe && typeof event.open_time === 'number') {
+          setLiveCandle({
+            time: Math.floor(event.open_time / 1000),
+            open: event.open ?? event.close,
+            high: event.high ?? event.close,
+            low: event.low ?? event.close,
+            close: event.close,
+          });
+        }
       } else if (event.event_type === 'depth' && event.bids && event.asks) {
-        // Real-time microstructure: recompute on every depth tick off the stream.
+        // Real-time microstructure + liquidity: recompute on every depth tick.
         const m = computeMicrostructure(symbol, event.bids, event.asks);
         if (m) setLiveMicro(m);
+        setLiveBook({ bids: event.bids, asks: event.asks });
       }
     },
   });
@@ -56,7 +69,9 @@ export default function MarketDataPage() {
   useEffect(() => {
     setLivePrice(null);
     setLiveMicro(null);
-  }, [symbol]);
+    setLiveBook(null);
+    setLiveCandle(null);
+  }, [symbol, timeframe]);
 
   const symbols = useApi<string[]>(() => api.get<string[]>('/market/symbols').then((r) => r.data));
   const timeframes = useApi<string[]>(
@@ -112,6 +127,14 @@ export default function MarketDataPage() {
   // Prefer the real-time value computed from the depth stream; fall back to the
   // 15s REST snapshot until the first depth tick arrives.
   const microData = liveMicro ?? micro.data ?? null;
+  const depthBook =
+    liveBook ??
+    (book.data
+      ? {
+          bids: book.data.bids.map(([p, q]) => [Number(p), Number(q)] as [number, number]),
+          asks: book.data.asks.map(([p, q]) => [Number(p), Number(q)] as [number, number]),
+        }
+      : null);
 
   const streamBadge =
     live.status === 'open'
@@ -237,7 +260,7 @@ export default function MarketDataPage() {
       </Card>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <Card title={`Candles · ${symbol} ${timeframe}`} className="lg:col-span-2">
+        <Card title={`Chart · ${symbol} ${timeframe}`} className="lg:col-span-2">
           <AsyncSection
             state={candles}
             emptyWhen={(d) => d.length === 0}
@@ -249,32 +272,9 @@ export default function MarketDataPage() {
             }
           >
             {(data) => (
-              <TableWrap>
-                <table className="w-full">
-                  <thead className="bg-slate-900/60">
-                    <tr>
-                      <Th>Time</Th>
-                      <Th align="right">Open</Th>
-                      <Th align="right">High</Th>
-                      <Th align="right">Low</Th>
-                      <Th align="right">Close</Th>
-                      <Th align="right">Volume</Th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-800/50">
-                    {[...data].reverse().slice(0, 25).map((c) => (
-                      <tr key={c.timestamp} className="hover:bg-slate-800/30 transition-colors">
-                        <Td className="text-slate-400">{formatDateTime(c.timestamp)}</Td>
-                        <Td align="right" mono className="text-slate-300">{formatNumber(c.open)}</Td>
-                        <Td align="right" mono className="text-emerald-400">{formatNumber(c.high)}</Td>
-                        <Td align="right" mono className="text-red-400">{formatNumber(c.low)}</Td>
-                        <Td align="right" mono className="text-white">{formatNumber(c.close)}</Td>
-                        <Td align="right" mono className="text-slate-400">{formatNumber(c.volume, 2)}</Td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </TableWrap>
+              <div className="p-3">
+                <CandlestickChart candles={data} live={liveCandle} />
+              </div>
             )}
           </AsyncSection>
         </Card>
@@ -310,6 +310,23 @@ export default function MarketDataPage() {
           </AsyncSection>
         </Card>
       </div>
+
+      <Card title={`Liquidity · ${symbol}`} icon={<Activity className="w-4 h-4 text-cyan-400" />}>
+        <div className="p-5">
+          {depthBook ? (
+            <>
+              <DepthChart bids={depthBook.bids} asks={depthBook.asks} />
+              <div className="flex justify-between text-xs font-mono text-slate-500 mt-2">
+                <span className="text-emerald-400">cumulative bids</span>
+                <span>{liveBook ? 'live · depth stream' : 'snapshot'}</span>
+                <span className="text-red-400">cumulative asks</span>
+              </div>
+            </>
+          ) : (
+            <div className="text-sm text-slate-500">Loading depth…</div>
+          )}
+        </div>
+      </Card>
 
       {symbols.error && (
         <div className="text-xs text-amber-400">
