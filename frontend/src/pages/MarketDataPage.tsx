@@ -6,7 +6,7 @@ import { formatDateTime, formatNumber, formatSignedPercent } from '../lib/format
 import { useAction, useApi, usePolling } from '../lib/useApi';
 import { useMarketStream } from '../lib/useMarketStream';
 import { computeMicrostructure } from '../lib/microstructure';
-import CandlestickChart, { type LiveCandle } from '../components/CandlestickChart';
+import ProChart, { type LiveCandle } from '../components/ProChart';
 import DepthChart from '../components/DepthChart';
 import type { Candle, MarketCoverage, MicrostructureMetrics, Orderbook, Ticker } from '../lib/types';
 import {
@@ -55,6 +55,7 @@ export default function MarketDataPage() {
             high: event.high ?? event.close,
             low: event.low ?? event.close,
             close: event.close,
+            volume: event.volume ?? 0,
           });
         }
       } else if (event.event_type === 'depth' && event.bids && event.asks) {
@@ -260,7 +261,20 @@ export default function MarketDataPage() {
       </Card>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <Card title={`Chart · ${symbol} ${timeframe}`} className="lg:col-span-2">
+        <Card title={`Chart · ${symbol}`} className="lg:col-span-2">
+          <div className="flex gap-1.5 px-4 pt-3">
+            {(timeframes.data ?? ['15m', '1h', '4h', '1d']).map((tf) => (
+              <button
+                key={tf}
+                onClick={() => setTimeframe(tf)}
+                className={`rounded px-2.5 py-1 text-xs font-medium transition-colors ${
+                  tf === timeframe ? 'bg-cyan-500/15 text-cyan-300' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
+                }`}
+              >
+                {tf}
+              </button>
+            ))}
+          </div>
           <AsyncSection
             state={candles}
             emptyWhen={(d) => d.length === 0}
@@ -273,7 +287,7 @@ export default function MarketDataPage() {
           >
             {(data) => (
               <div className="p-3">
-                <CandlestickChart candles={data} live={liveCandle} />
+                <ProChart candles={data} live={liveCandle} />
               </div>
             )}
           </AsyncSection>

@@ -28,6 +28,8 @@ export interface Candle {
   low: number;
   close: number;
   volume: number;
+  quote_volume?: number;
+  trades_count?: number;
 }
 
 export interface Ticker {
