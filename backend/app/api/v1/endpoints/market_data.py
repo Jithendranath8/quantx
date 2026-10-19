@@ -16,8 +16,11 @@ from sqlalchemy import select
 from app.connectors.binance_client import get_binance_client
 from app.core.config import get_settings
 from app.core.dependencies import CurrentUser, DBSession, RateLimiter
+from app.core.exceptions import NotFoundError
+from app.engines.microstructure.analytics import analyze_order_book
 from app.models.market_data import Candle
 from app.schemas.market_data import CandleSchema, DownloadHistoryRequest
+from app.schemas.microstructure import MicrostructureResponse
 from app.services.market_coverage_service import MarketCoverageService
 from app.workers.downloader import download_historical_klines
 from app.workers.market_data import sync_market_data as sync_market_data_task
@@ -123,6 +126,43 @@ async def get_orderbook(
 ) -> dict[str, Any]:
     """Fetch live orderbook depth for a symbol."""
     return await get_binance_client().get_orderbook(symbol=symbol, limit=limit)
+
+
+@router.get(
+    "/microstructure",
+    response_model=MicrostructureResponse,
+    summary="Live order-book microstructure signals",
+    dependencies=[Depends(RateLimiter("market_microstructure", max_requests=60))],
+)
+async def get_microstructure(
+    user: CurrentUser,
+    symbol: str = Query("BTCUSDT", min_length=3, max_length=20),
+    levels: int = Query(10, ge=1, le=100, description="Top levels summed for imbalance"),
+    depth_bps: float = Query(25.0, gt=0, le=1000, description="Depth half-window, bps of mid"),
+) -> MicrostructureResponse:
+    """Microprice, spread, order-book imbalance and resting depth for a symbol."""
+    book = await get_binance_client().get_orderbook(symbol=symbol, limit=max(levels, 100))
+    bids = [[float(p), float(q)] for p, q in book.get("bids", [])]
+    asks = [[float(p), float(q)] for p, q in book.get("asks", [])]
+    metrics = analyze_order_book(bids, asks, levels=levels, depth_bps=depth_bps)
+    if metrics is None:
+        raise NotFoundError(f"No order book available for {symbol.upper()}.")
+    return MicrostructureResponse(
+        symbol=symbol.upper(),
+        best_bid=metrics.best_bid,
+        best_ask=metrics.best_ask,
+        mid=metrics.mid,
+        microprice=metrics.microprice,
+        spread=metrics.spread,
+        spread_bps=metrics.spread_bps,
+        imbalance=metrics.imbalance,
+        bid_depth=metrics.bid_depth,
+        ask_depth=metrics.ask_depth,
+        bid_levels=metrics.bid_levels,
+        ask_levels=metrics.ask_levels,
+        levels=levels,
+        depth_bps=depth_bps,
+    )
 
 
 @router.get(
