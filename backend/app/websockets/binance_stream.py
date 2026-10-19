@@ -46,6 +46,12 @@ class BinanceStreamManager:
     # "RECONNECTING".
     WS_TESTNET_URL = "wss://stream.testnet.binance.vision/stream"
 
+    # Partial order-book depth feed for live microstructure: top N levels pushed
+    # every SPEED ms. This is what makes the imbalance/microprice real-time
+    # rather than a periodic REST snapshot.
+    DEPTH_LEVELS = 20
+    DEPTH_SPEED_MS = 100
+
     def __init__(
         self,
         symbols: list[str] | None = None,
@@ -69,13 +75,18 @@ class BinanceStreamManager:
 
     @property
     def stream_url(self) -> str:
-        """Combined-stream URL covering every configured symbol and interval."""
-        streams = [
+        """Combined-stream URL: a kline stream per (symbol, interval) plus a
+        partial order-book depth stream per symbol for live microstructure."""
+        klines = [
             f"{symbol.lower()}@kline_{interval}"
             for symbol in self.symbols
             for interval in self.intervals
         ]
-        return f"{self.base_url}?streams={'/'.join(streams)}"
+        depth = [
+            f"{symbol.lower()}@depth{self.DEPTH_LEVELS}@{self.DEPTH_SPEED_MS}ms"
+            for symbol in self.symbols
+        ]
+        return f"{self.base_url}?streams={'/'.join(klines + depth)}"
 
     async def start(self) -> None:
         """Start consuming the Binance stream in the background."""
@@ -145,10 +156,12 @@ class BinanceStreamManager:
             logger.warning("binance_stream_unparseable_message")
             return
 
-        # Combined streams wrap the payload; single streams do not.
+        # Combined streams wrap the payload; single streams do not. The stream
+        # key names the symbol for partial-depth events that lack their own.
         raw = envelope.get("data", envelope)
+        stream_name = envelope.get("stream", "") if isinstance(envelope, dict) else ""
 
-        event = MarketDataNormalizer.normalize(raw)
+        event = MarketDataNormalizer.normalize(raw, stream_name)
         if event is None or not event.get("symbol"):
             return
 

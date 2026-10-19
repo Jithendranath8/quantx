@@ -5,6 +5,7 @@ import api from '../lib/api';
 import { formatDateTime, formatNumber, formatSignedPercent } from '../lib/format';
 import { useAction, useApi, usePolling } from '../lib/useApi';
 import { useMarketStream } from '../lib/useMarketStream';
+import { computeMicrostructure } from '../lib/microstructure';
 import type { Candle, MarketCoverage, MicrostructureMetrics, Orderbook, Ticker } from '../lib/types';
 import {
   AsyncSection,
@@ -31,6 +32,7 @@ export default function MarketDataPage() {
   const [symbol, setSymbol] = useState('BTCUSDT');
   const [timeframe, setTimeframe] = useState('1h');
   const [livePrice, setLivePrice] = useState<number | null>(null);
+  const [liveMicro, setLiveMicro] = useState<MicrostructureMetrics | null>(null);
 
   // Only open a socket when the server is actually ingesting.
   const stream = useApi<StreamStatusResponse>(
@@ -43,12 +45,17 @@ export default function MarketDataPage() {
     onEvent: (event) => {
       if (event.event_type === 'kline' && typeof event.close === 'number') {
         setLivePrice(event.close);
+      } else if (event.event_type === 'depth' && event.bids && event.asks) {
+        // Real-time microstructure: recompute on every depth tick off the stream.
+        const m = computeMicrostructure(symbol, event.bids, event.asks);
+        if (m) setLiveMicro(m);
       }
     },
   });
 
   useEffect(() => {
     setLivePrice(null);
+    setLiveMicro(null);
   }, [symbol]);
 
   const symbols = useApi<string[]>(() => api.get<string[]>('/market/symbols').then((r) => r.data));
@@ -102,6 +109,9 @@ export default function MarketDataPage() {
   const change = ticker.data?.priceChangePercent ? Number(ticker.data.priceChangePercent) : null;
   const restPrice = ticker.data?.lastPrice ? Number(ticker.data.lastPrice) : null;
   const displayPrice = livePrice ?? restPrice;
+  // Prefer the real-time value computed from the depth stream; fall back to the
+  // 15s REST snapshot until the first depth tick arrives.
+  const microData = liveMicro ?? micro.data ?? null;
 
   const streamBadge =
     live.status === 'open'
@@ -181,38 +191,49 @@ export default function MarketDataPage() {
       </div>
 
       <Card title={`Microstructure · ${symbol}`} icon={<Activity className="w-4 h-4 text-cyan-400" />}>
-        <AsyncSection state={micro}>
-          {(m) => (
-            <div className="p-5 space-y-4">
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-                <StatTile label="Microprice" value={formatNumber(m.microprice)} sub={`mid ${formatNumber(m.mid)}`} />
-                <StatTile label="Spread" value={`${formatNumber(m.spread_bps, 2)} bps`} sub={formatNumber(m.spread)} />
-                <StatTile
-                  label="Imbalance"
-                  value={formatNumber(m.imbalance, 3)}
-                  sub={`top ${m.levels} levels`}
-                  tone={m.imbalance >= 0 ? 'positive' : 'negative'}
-                />
-                <StatTile
-                  label={`Depth ±${m.depth_bps}bps`}
-                  value={`${formatNumber(m.bid_depth, 2)} / ${formatNumber(m.ask_depth, 2)}`}
-                  sub="bid / ask"
-                />
+        {microData ? (
+          <div className="p-5 space-y-4">
+            <div className="flex justify-end">
+              <Badge tone={liveMicro ? 'positive' : 'neutral'}>
+                {liveMicro ? 'live · depth stream' : 'polling · 15s'}
+              </Badge>
+            </div>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+              <StatTile label="Microprice" value={formatNumber(microData.microprice)} sub={`mid ${formatNumber(microData.mid)}`} />
+              <StatTile label="Spread" value={`${formatNumber(microData.spread_bps, 2)} bps`} sub={formatNumber(microData.spread)} />
+              <StatTile
+                label="Imbalance"
+                value={formatNumber(microData.imbalance, 3)}
+                sub={`top ${microData.levels} levels`}
+                tone={microData.imbalance >= 0 ? 'positive' : 'negative'}
+              />
+              <StatTile
+                label={`Depth ±${microData.depth_bps}bps`}
+                value={`${formatNumber(microData.bid_depth, 2)} / ${formatNumber(microData.ask_depth, 2)}`}
+                sub="bid / ask"
+              />
+            </div>
+            <div>
+              <div className="flex justify-between text-xs text-slate-500 mb-1">
+                <span className="text-emerald-400">bids</span>
+                <span>order-book imbalance</span>
+                <span className="text-red-400">asks</span>
               </div>
-              <div>
-                <div className="flex justify-between text-xs text-slate-500 mb-1">
-                  <span className="text-emerald-400">bids</span>
-                  <span>order-book imbalance</span>
-                  <span className="text-red-400">asks</span>
-                </div>
-                <div className="flex h-2.5 rounded-full overflow-hidden bg-slate-800">
-                  <div className="bg-emerald-500/70" style={{ width: `${((1 + m.imbalance) / 2) * 100}%` }} />
-                  <div className="bg-red-500/70" style={{ width: `${((1 - m.imbalance) / 2) * 100}%` }} />
-                </div>
+              <div className="flex h-2.5 rounded-full overflow-hidden bg-slate-800">
+                <div
+                  className="bg-emerald-500/70 transition-all duration-150"
+                  style={{ width: `${((1 + microData.imbalance) / 2) * 100}%` }}
+                />
+                <div
+                  className="bg-red-500/70 transition-all duration-150"
+                  style={{ width: `${((1 - microData.imbalance) / 2) * 100}%` }}
+                />
               </div>
             </div>
-          )}
-        </AsyncSection>
+          </div>
+        ) : (
+          <div className="p-5 text-sm text-slate-500">{micro.error ?? 'Loading microstructure…'}</div>
+        )}
       </Card>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
