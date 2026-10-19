@@ -28,6 +28,9 @@ const C_MA = ['#f0b90b', '#ec4899', '#8b5cf6']; // MA7 / MA25 / MA99
 const C_VOLMA = ['#f0b90b', '#8b5cf6']; // MA5 / MA10
 const MA_P = [7, 25, 99];
 const VOLMA_P = [5, 10];
+// Bars shown on first paint: a readable candle width, Binance-style. The rest
+// of the loaded history stays off-screen to the left and is scrollable.
+const DEFAULT_BARS = 160;
 
 const baseLayout = {
   // attributionLogo: false removes the default "TradingView" logo in the corner.
@@ -183,7 +186,14 @@ export default function ProChart({ candles, live }: { candles: Candle[]; live?: 
     rsiS.current?.setData(line(times, rsi));
 
     setMeta({ times, o, h, l, c, v, quote, txn, ma, volMa, macd, rsi, idxOf });
-    charts.current[0]?.timeScale().fitContent();
+    // Open on the most recent bars at a readable width rather than squashing all
+    // of the loaded history into view; the sync subscription pans the other
+    // panes to match. Fall back to fitContent when there is little data.
+    const ts = charts.current[0]?.timeScale();
+    if (ts) {
+      if (candles.length > DEFAULT_BARS) ts.setVisibleLogicalRange({ from: candles.length - DEFAULT_BARS, to: candles.length + 2 });
+      else ts.fitContent();
+    }
   }, [candles]);
 
   // ── Live-update the forming candle + its volume bar ────────────────

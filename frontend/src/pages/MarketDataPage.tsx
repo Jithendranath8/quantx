@@ -98,7 +98,10 @@ export default function MarketDataPage() {
   const candles = useApi<Candle[]>(
     () =>
       api
-        .get<Candle[]>('/market/klines', { params: { symbol, timeframe, limit: 100 } })
+        // Pull deep history (the backend caps at 1000): enough to draw MA99 and
+        // scroll back well over a week on the common timeframes. ProChart opens
+        // on the most recent bars and lets you pan back through the rest.
+        .get<Candle[]>('/market/klines', { params: { symbol, timeframe, limit: 1000 } })
         .then((r) => r.data),
     [symbol, timeframe],
   );
