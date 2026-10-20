@@ -282,3 +282,29 @@ class TestLocalMarketBus:
             # Never blocked; capped at the queue size, oldest evicted.
             assert q.qsize() == QUEUE_MAXSIZE
             assert await asyncio.wait_for(q.get(), timeout=1.0) == "5"
+
+
+@pytest.mark.unit
+class TestPartialDepth:
+    """Partial-book-depth events (the live microstructure feed) carry no symbol
+    of their own; it comes from the combined-stream name."""
+
+    def test_symbol_is_taken_from_the_stream_name(self) -> None:
+        ev = MarketDataNormalizer.normalize(
+            {"lastUpdateId": 1, "bids": [["100.0", "2.0"]], "asks": [["101.0", "3.0"]]},
+            "btcusdt@depth20@100ms",
+        )
+        assert ev is not None
+        assert ev["event_type"] == "depth"
+        assert ev["symbol"] == "BTCUSDT"
+        assert ev["bids"] == [[100.0, 2.0]]
+        assert ev["asks"] == [[101.0, 3.0]]
+
+    def test_dropped_when_the_stream_name_is_missing(self) -> None:
+        raw = {"bids": [["1", "1"]], "asks": [["2", "1"]]}
+        assert MarketDataNormalizer.normalize(raw, "") is None
+
+    def test_stream_url_subscribes_to_both_klines_and_depth(self) -> None:
+        m = BinanceStreamManager(symbols=["BTCUSDT"], intervals=["1m"])
+        assert "btcusdt@kline_1m" in m.stream_url
+        assert "btcusdt@depth20@100ms" in m.stream_url

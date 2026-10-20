@@ -124,15 +124,38 @@ class MarketDataNormalizer:
             "asks": [[float(p), float(q)] for p, q in raw.get("a", [])],
         }
 
+    @staticmethod
+    def normalize_partial_depth(raw: dict[str, Any], symbol: str) -> dict[str, Any]:
+        """Convert a partial-book-depth event into the domain shape.
+
+        The ``<symbol>@depthN`` stream's payload is just ``{lastUpdateId, bids,
+        asks}`` with no symbol or event-time field, so the symbol is taken from
+        the combined-stream name and the receive time stands in for the clock.
+        """
+        return {
+            "event_type": "depth",
+            "symbol": symbol.upper(),
+            "timestamp": int(time.time() * 1000),
+            "bids": [[float(p), float(q)] for p, q in raw.get("bids", [])],
+            "asks": [[float(p), float(q)] for p, q in raw.get("asks", [])],
+        }
+
     @classmethod
-    def normalize(cls, raw: dict[str, Any]) -> dict[str, Any] | None:
-        """Dispatch on the Binance event shape; None when unrecognized."""
+    def normalize(cls, raw: dict[str, Any], stream_name: str = "") -> dict[str, Any] | None:
+        """Dispatch on the Binance event shape; None when unrecognized.
+
+        ``stream_name`` is the combined-stream key (e.g. ``btcusdt@depth20@100ms``),
+        needed for partial-depth events that do not carry their own symbol.
+        """
         if "k" in raw:
             return cls.normalize_kline(raw)
         if "p" in raw and "q" in raw:
             return cls.normalize_trade(raw)
         if "b" in raw and "a" in raw:
             return cls.normalize_depth(raw)
+        if "bids" in raw and "asks" in raw:
+            symbol = stream_name.split("@", 1)[0] if stream_name else ""
+            return cls.normalize_partial_depth(raw, symbol) if symbol else None
         return None
 
 

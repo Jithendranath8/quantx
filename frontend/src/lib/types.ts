@@ -28,6 +28,8 @@ export interface Candle {
   low: number;
   close: number;
   volume: number;
+  quote_volume?: number;
+  trades_count?: number;
 }
 
 export interface Ticker {
@@ -43,6 +45,23 @@ export interface Ticker {
 export interface Orderbook {
   bids: [string, string][];
   asks: [string, string][];
+}
+
+export interface MicrostructureMetrics {
+  symbol: string;
+  best_bid: number;
+  best_ask: number;
+  mid: number;
+  microprice: number;
+  spread: number;
+  spread_bps: number;
+  imbalance: number;
+  bid_depth: number;
+  ask_depth: number;
+  bid_levels: number;
+  ask_levels: number;
+  levels: number;
+  depth_bps: number;
 }
 
 export interface Signal {

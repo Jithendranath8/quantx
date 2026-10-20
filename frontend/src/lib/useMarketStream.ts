@@ -22,6 +22,7 @@ export interface MarketEvent {
   symbol: string;
   timestamp: number;
   interval?: string;
+  open_time?: number;
   open?: number;
   high?: number;
   low?: number;
