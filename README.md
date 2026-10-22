@@ -9,6 +9,11 @@ price-direction model, and a Model Context Protocol server on top.
 **Stack:** FastAPI · SQLAlchemy 2 (async) · PostgreSQL · Redis · Celery · React
 18 · LangGraph · PyTorch / TensorFlow · MLflow · Model Context Protocol · Docker.
 
+**Version 1.0** — live and deployed: real-time Binance market data with a
+Binance-style multi-pane chart suite, order-book microstructure signals, the
+multi-agent AI layer, and a $0 production deployment (Railway · Cloudflare Pages
+· Neon · Upstash).
+
 ---
 
 ## Safety model
@@ -70,7 +75,8 @@ message is a background job that silently disappears.
 | Subsystem | Summary |
 |---|---|
 | **Auth** | JWT access tokens, rotating refresh tokens with reuse detection, bcrypt hashing |
-| **Market data** | Binance SPOT REST, historical OHLCV backfill, optional WebSocket ingestion, scheduled funding-rate and open-interest capture |
+| **Market data** | Binance SPOT REST + real-time WebSocket streaming (kline + partial order-book depth), historical OHLCV backfill, scheduled funding-rate and open-interest capture |
+| **Charts & microstructure** | Binance-style multi-pane chart — candlesticks + MA(7/25/99), volume, MACD, RSI — with hover OHLCV and deep history; live order-book depth/liquidity chart; microstructure signals: microprice, spread (bps), order-book imbalance, resting depth |
 | **Indicators** | SMA, EMA, RSI, MACD, Bollinger, ATR, ADX, VWAP, Stochastic, OBV, Ichimoku (Wilder smoothing where required) |
 | **Strategies** | EMA crossover, RSI mean reversion, MACD momentum, Bollinger breakout, multi-timeframe trend — parameterizable for search |
 | **Risk engine** | Per-trade risk, daily loss, leverage, exposure, concurrency; circuit breaker persisted per user |
