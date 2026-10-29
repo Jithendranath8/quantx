@@ -223,7 +223,7 @@ export default function ProChart({ candles, live }: { candles: Candle[]; live?: 
         )}
         {/* Boxed OHLCV tooltip: only while the crosshair is over a candle. */}
         {meta && hover !== null && (
-          <div className="absolute left-2 top-7 z-10 w-36 rounded-md border border-slate-700/60 bg-slate-900/90 p-2 text-[11px] font-mono text-slate-400 backdrop-blur-sm">
+          <div className="absolute left-2 top-7 z-10 w-36 rounded-md border border-zinc-700/60 bg-zinc-900/90 p-2 text-[11px] font-mono text-zinc-400 backdrop-blur-sm">
             {([
               ['Time', new Date(meta.times[i] * 1000).toLocaleString(undefined, { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })],
               ['Open', fmt(meta.o[i])],
@@ -231,23 +231,23 @@ export default function ProChart({ candles, live }: { candles: Candle[]; live?: 
               ['Low', fmt(meta.l[i])],
               ['Close', fmt(meta.c[i])],
             ] as [string, string][]).map(([k, val]) => (
-              <div key={k} className="flex justify-between gap-2"><span>{k}</span><span className="text-slate-200">{val}</span></div>
+              <div key={k} className="flex justify-between gap-2"><span>{k}</span><span className="text-zinc-200">{val}</span></div>
             ))}
             <div className="flex justify-between gap-2"><span>Chg</span><span className={chg >= 0 ? 'text-emerald-400' : 'text-red-400'}>{chg >= 0 ? '+' : ''}{fmt(chg)}</span></div>
             <div className="flex justify-between gap-2"><span>%Chg</span><span className={pct >= 0 ? 'text-emerald-400' : 'text-red-400'}>{pct >= 0 ? '+' : ''}{fmt(pct)}%</span></div>
-            <div className="flex justify-between gap-2"><span>Range</span><span className="text-slate-300">{fmt(rangePct)}%</span></div>
-            <div className="flex justify-between gap-2"><span>Vol</span><span className="text-slate-300">{fmt(meta.v[i])}</span></div>
-            <div className="flex justify-between gap-2"><span>Txn</span><span className="text-slate-300">{compact(meta.txn[i])}</span></div>
+            <div className="flex justify-between gap-2"><span>Range</span><span className="text-zinc-300">{fmt(rangePct)}%</span></div>
+            <div className="flex justify-between gap-2"><span>Vol</span><span className="text-zinc-300">{fmt(meta.v[i])}</span></div>
+            <div className="flex justify-between gap-2"><span>Txn</span><span className="text-zinc-300">{compact(meta.txn[i])}</span></div>
           </div>
         )}
         <div ref={mainEl} className="h-72 w-full" />
       </div>
 
       {/* Volume pane */}
-      <div className="relative border-t border-slate-800/60">
+      <div className="relative border-t border-zinc-800/60">
         {meta && (
-          <div className="absolute left-2 top-1 z-10 flex flex-wrap gap-x-3 text-[10px] font-mono text-slate-400">
-            <span>Vol <span className="text-slate-300">{compact(meta.v[i])}</span></span>
+          <div className="absolute left-2 top-1 z-10 flex flex-wrap gap-x-3 text-[10px] font-mono text-zinc-400">
+            <span>Vol <span className="text-zinc-300">{compact(meta.v[i])}</span></span>
             <span style={{ color: C_VOLMA[0] }}>MA(5): {maVal(meta.volMa[0])}</span>
             <span style={{ color: C_VOLMA[1] }}>MA(10): {maVal(meta.volMa[1])}</span>
           </div>
@@ -256,7 +256,7 @@ export default function ProChart({ candles, live }: { candles: Candle[]; live?: 
       </div>
 
       {/* MACD pane */}
-      <div className="relative border-t border-slate-800/60">
+      <div className="relative border-t border-zinc-800/60">
         {meta && (
           <div className="absolute left-2 top-1 z-10 flex flex-wrap gap-x-3 text-[10px] font-mono">
             <span style={{ color: C_MA[0] }}>DIF: {maVal(meta.macd.dif)}</span>
@@ -268,7 +268,7 @@ export default function ProChart({ candles, live }: { candles: Candle[]; live?: 
       </div>
 
       {/* RSI pane */}
-      <div className="relative border-t border-slate-800/60">
+      <div className="relative border-t border-zinc-800/60">
         {meta && (
           <div className="absolute left-2 top-1 z-10 text-[10px] font-mono" style={{ color: C_MA[0] }}>
             RSI(6): {maVal(meta.rsi)}

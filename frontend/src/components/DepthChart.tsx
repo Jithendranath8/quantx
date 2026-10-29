@@ -12,7 +12,7 @@ export default function DepthChart({
   asks: [number, number][];
 }) {
   if (bids.length < 2 || asks.length < 2) {
-    return <div className="p-5 text-xs text-slate-500">No depth data.</div>;
+    return <div className="p-5 text-xs text-zinc-500">No depth data.</div>;
   }
 
   // Cumulative volume outward from the mid.
