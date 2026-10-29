@@ -5,6 +5,8 @@ export interface User {
   email: string;
   username: string;
   full_name: string | null;
+  /** Provider that can sign this account in; null for password-only accounts. */
+  oauth_provider?: string | null;
   is_active: boolean;
   is_superuser?: boolean;
 }
@@ -383,6 +385,9 @@ export interface OptimizationResult {
   top_candidates: OptimizationCandidate[];
   overfitting_warning: boolean;
   recommendation: string;
+  probabilistic_sharpe: number | null;
+  deflated_sharpe: number | null;
+  probability_of_backtest_overfitting: number | null;
 }
 
 export interface MonteCarloSummary {

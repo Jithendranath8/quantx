@@ -56,7 +56,7 @@ export default function ExperimentsPage() {
         description="Walk-forward, parameter search, Monte Carlo, and causality auditing"
       />
 
-      <Card title="Run a Study" icon={<FlaskConical className="w-4 h-4 text-cyan-400" />}>
+      <Card title="Run a Study" icon={<FlaskConical className="w-4 h-4 text-brand-400" />}>
         <div className="p-5 flex flex-wrap items-end gap-4">
           <Field label="Tool">
             <Select value={tool} onChange={(e) => { setTool(e.target.value as Tool); setOutput(null); }}>
@@ -86,7 +86,7 @@ export default function ExperimentsPage() {
           </Button>
         </div>
         {run.error && <div className="px-5 pb-5 text-xs text-red-400">{run.error}</div>}
-        <p className="px-5 pb-5 text-xs text-slate-600">
+        <p className="px-5 pb-5 text-xs text-zinc-600">
           Every study runs real backtests over your stored candles. Results depend on the data you
           have ingested for this symbol and timeframe.
         </p>
@@ -107,7 +107,7 @@ export default function ExperimentsPage() {
           {(data) => (
             <TableWrap>
               <table className="w-full">
-                <thead className="bg-slate-900/60">
+                <thead className="bg-zinc-900/60">
                   <tr>
                     <Th>ID</Th>
                     <Th>Strategy</Th>
@@ -116,14 +116,14 @@ export default function ExperimentsPage() {
                     <Th>Created</Th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-800/50">
+                <tbody className="divide-y divide-zinc-800/50">
                   {data.map((e) => (
-                    <tr key={e.experiment_id} className="hover:bg-slate-800/30 transition-colors">
-                      <Td mono className="text-cyan-400 text-xs">{e.experiment_id}</Td>
+                    <tr key={e.experiment_id} className="hover:bg-zinc-800/30 transition-colors">
+                      <Td mono className="text-brand-400 text-xs">{e.experiment_id}</Td>
                       <Td className="text-white">{e.strategy_name}</Td>
-                      <Td mono className="text-slate-300">{e.symbol}</Td>
-                      <Td mono className="text-slate-400">{e.timeframe}</Td>
-                      <Td className="text-slate-500 text-xs">{formatDateTime(e.created_at)}</Td>
+                      <Td mono className="text-zinc-300">{e.symbol}</Td>
+                      <Td mono className="text-zinc-400">{e.timeframe}</Td>
+                      <Td className="text-zinc-500 text-xs">{formatDateTime(e.created_at)}</Td>
                     </tr>
                   ))}
                 </tbody>
@@ -145,17 +145,17 @@ function WalkForward({ result }: { result: WalkForwardResult }) {
       }
     >
       <div className="p-5 space-y-3">
-        <p className="text-sm text-slate-400">{result.message}</p>
+        <p className="text-sm text-zinc-400">{result.message}</p>
         <div className="flex gap-6 text-xs font-mono">
-          <span className="text-slate-500">IS Sharpe <span className="text-white">{formatNumber(result.avg_in_sample_sharpe)}</span></span>
-          <span className="text-slate-500">OOS Sharpe <span className="text-white">{formatNumber(result.avg_out_of_sample_sharpe)}</span></span>
-          <span className="text-slate-500">Efficiency <span className="text-white">{formatNumber(result.efficiency_ratio)}</span></span>
+          <span className="text-zinc-500">IS Sharpe <span className="text-white">{formatNumber(result.avg_in_sample_sharpe)}</span></span>
+          <span className="text-zinc-500">OOS Sharpe <span className="text-white">{formatNumber(result.avg_out_of_sample_sharpe)}</span></span>
+          <span className="text-zinc-500">Efficiency <span className="text-white">{formatNumber(result.efficiency_ratio)}</span></span>
         </div>
       </div>
       {result.windows.length > 0 && (
         <TableWrap>
           <table className="w-full">
-            <thead className="bg-slate-900/60">
+            <thead className="bg-zinc-900/60">
               <tr>
                 <Th>Window</Th>
                 <Th align="right">Train bars</Th>
@@ -166,18 +166,18 @@ function WalkForward({ result }: { result: WalkForwardResult }) {
                 <Th align="right">OOS trades</Th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-800/50">
+            <tbody className="divide-y divide-zinc-800/50">
               {result.windows.map((w) => (
-                <tr key={w.window_id} className="hover:bg-slate-800/30 transition-colors">
+                <tr key={w.window_id} className="hover:bg-zinc-800/30 transition-colors">
                   <Td mono className="text-white">#{w.window_id}</Td>
-                  <Td align="right" mono className="text-slate-400">{w.train_bars}</Td>
-                  <Td align="right" mono className="text-slate-400">{w.test_bars}</Td>
-                  <Td align="right" mono className="text-slate-300">{formatNumber(w.in_sample_sharpe)}</Td>
+                  <Td align="right" mono className="text-zinc-400">{w.train_bars}</Td>
+                  <Td align="right" mono className="text-zinc-400">{w.test_bars}</Td>
+                  <Td align="right" mono className="text-zinc-300">{formatNumber(w.in_sample_sharpe)}</Td>
                   <Td align="right" mono className="text-white">{formatNumber(w.out_of_sample_sharpe)}</Td>
                   <Td align="right" mono className={w.out_of_sample_return_pct >= 0 ? 'text-emerald-400' : 'text-red-400'}>
                     {formatPercent(w.out_of_sample_return_pct)}
                   </Td>
-                  <Td align="right" mono className="text-slate-400">{w.out_of_sample_trades}</Td>
+                  <Td align="right" mono className="text-zinc-400">{w.out_of_sample_trades}</Td>
                 </tr>
               ))}
             </tbody>
@@ -195,13 +195,20 @@ function Optimization({ result }: { result: OptimizationResult }) {
       actions={result.overfitting_warning ? <Badge tone="negative">overfitting risk</Badge> : null}
     >
       <div className="p-5 space-y-2">
-        <p className="text-sm text-slate-400">{result.recommendation}</p>
-        <p className="text-xs font-mono text-slate-600">{result.total_evaluations} parameter sets evaluated</p>
+        <p className="text-sm text-zinc-400">{result.recommendation}</p>
+        <p className="text-xs font-mono text-zinc-600">{result.total_evaluations} parameter sets evaluated</p>
+        {result.deflated_sharpe !== null && (
+          <p className="text-xs font-mono text-zinc-500">
+            PSR {formatNumber(result.probabilistic_sharpe ?? 0)} · DSR {formatNumber(result.deflated_sharpe)}
+            {result.probability_of_backtest_overfitting !== null &&
+              ` · PBO ${(result.probability_of_backtest_overfitting * 100).toFixed(0)}%`}
+          </p>
+        )}
       </div>
       {result.top_candidates.length > 0 && (
         <TableWrap>
           <table className="w-full">
-            <thead className="bg-slate-900/60">
+            <thead className="bg-zinc-900/60">
               <tr>
                 <Th>Parameters</Th>
                 <Th align="right">Sharpe</Th>
@@ -210,16 +217,16 @@ function Optimization({ result }: { result: OptimizationResult }) {
                 <Th align="right">Trades</Th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-800/50">
+            <tbody className="divide-y divide-zinc-800/50">
               {result.top_candidates.map((c, i) => (
-                <tr key={i} className="hover:bg-slate-800/30 transition-colors">
-                  <Td mono className="text-cyan-400 text-xs">{JSON.stringify(c.params)}</Td>
+                <tr key={i} className="hover:bg-zinc-800/30 transition-colors">
+                  <Td mono className="text-brand-400 text-xs">{JSON.stringify(c.params)}</Td>
                   <Td align="right" mono className="text-white">{formatNumber(c.sharpe_ratio)}</Td>
                   <Td align="right" mono className={c.total_return_pct >= 0 ? 'text-emerald-400' : 'text-red-400'}>
                     {formatPercent(c.total_return_pct)}
                   </Td>
-                  <Td align="right" mono className="text-slate-400">{formatPercent(c.max_drawdown_pct)}</Td>
-                  <Td align="right" mono className="text-slate-400">{c.total_trades}</Td>
+                  <Td align="right" mono className="text-zinc-400">{formatPercent(c.max_drawdown_pct)}</Td>
+                  <Td align="right" mono className="text-zinc-400">{c.total_trades}</Td>
                 </tr>
               ))}
             </tbody>
@@ -245,7 +252,7 @@ function MonteCarlo({ result }: { result: MonteCarloSummary }) {
           ['Expected losing streak', result.expected_longest_losing_streak],
         ].map(([label, value]) => (
           <div key={String(label)}>
-            <div className="text-xs text-slate-500 uppercase tracking-wider">{label}</div>
+            <div className="text-xs text-zinc-500 uppercase tracking-wider">{label}</div>
             <div className="text-white font-mono mt-1">{value}</div>
           </div>
         ))}
@@ -263,8 +270,8 @@ function BiasCheck({ result }: { result: BiasCheckReport }) {
       }
     >
       <div className="p-5 space-y-2">
-        <p className="text-sm text-slate-400">{result.message}</p>
-        <p className="text-xs font-mono text-slate-600">
+        <p className="text-sm text-zinc-400">{result.message}</p>
+        <p className="text-xs font-mono text-zinc-600">
           {result.bars_tested} bars tested · {result.violations_found} violations
         </p>
       </div>
