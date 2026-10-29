@@ -328,3 +328,94 @@ class TestKillSwitch:
 
         assert res["circuit_breaker_active"] is False
         assert await RiskStateService(db_session).is_halted(test_user.id) is False
+
+
+def _prior_fill(user: User, side: str, quantity: float, price: float, at: Any, symbol: str = "BTCUSDT") -> LiveOrder:
+    """A live order QuantX recorded earlier, as the book replays it."""
+    return LiveOrder(
+        user_id=user.id,
+        client_order_id=f"qx{uuid.uuid4().hex[:30]}",
+        symbol=symbol,
+        side=side,
+        order_type="MARKET",
+        quantity=quantity,
+        filled_quantity=quantity,
+        filled_price=price,
+        status="FILLED",
+        is_testnet=True,
+        transact_time=at,
+    )
+
+
+@pytest.mark.unit
+class TestLiveRiskBook:
+    """Live BUYs are checked against the book rebuilt from recorded fills."""
+
+    @pytest.mark.asyncio
+    async def test_exposure_counts_positions_already_held(self, db_session: AsyncSession, test_user: User) -> None:
+        from datetime import UTC, datetime, timedelta
+
+        db_session.add(_prior_fill(test_user, "BUY", 0.9, 50_000.0, datetime.now(UTC) - timedelta(hours=1)))
+        await db_session.commit()
+        client = StubBinanceClient(balance=55_000.0)  # equity = 55k cash + 45k held
+
+        with pytest.raises(RiskLimitExceededError, match="portfolio exposure"):
+            await LiveTradingService(db_session, client=client).execute_live_order(
+                test_user.id, order_request(quantity=0.12, stop_price=49_000.0)
+            )
+        assert client.placed == []
+
+    @pytest.mark.asyncio
+    async def test_todays_live_losses_trip_and_persist_the_breaker(
+        self, db_session: AsyncSession, test_user: User
+    ) -> None:
+        from datetime import UTC, datetime, timedelta
+
+        now = datetime.now(UTC)
+        db_session.add(_prior_fill(test_user, "BUY", 1.0, 60_000.0, now - timedelta(minutes=50)))
+        db_session.add(_prior_fill(test_user, "SELL", 1.0, 54_000.0, now - timedelta(minutes=40)))  # -6k today
+        await db_session.commit()
+        client = StubBinanceClient()
+
+        with pytest.raises(RiskLimitExceededError, match="Max daily loss"):
+            await LiveTradingService(db_session, client=client).execute_live_order(test_user.id, order_request())
+        assert await RiskStateService(db_session).is_halted(test_user.id) is True
+        assert client.placed == []
+
+    @pytest.mark.asyncio
+    async def test_cooldown_after_a_losing_live_exit(self, db_session: AsyncSession, test_user: User) -> None:
+        from datetime import UTC, datetime, timedelta
+
+        now = datetime.now(UTC)
+        db_session.add(_prior_fill(test_user, "BUY", 0.01, 51_000.0, now - timedelta(minutes=10)))
+        db_session.add(_prior_fill(test_user, "SELL", 0.01, 50_000.0, now - timedelta(minutes=5)))
+        await db_session.commit()
+
+        with pytest.raises(RiskLimitExceededError, match="Cooldown"):
+            await LiveTradingService(db_session, client=StubBinanceClient()).execute_live_order(
+                test_user.id, order_request(quantity=0.01)
+            )
+
+    @pytest.mark.asyncio
+    async def test_oversized_live_buy_is_refused(self, db_session: AsyncSession, test_user: User) -> None:
+        client = StubBinanceClient()
+        with pytest.raises(RiskLimitExceededError, match="risk-per-trade"):
+            await LiveTradingService(db_session, client=client).execute_live_order(
+                test_user.id, order_request(quantity=0.3)  # $15k on $100k with no stop
+            )
+        assert client.placed == []
+
+    @pytest.mark.asyncio
+    async def test_a_live_sell_is_never_scored_as_new_exposure(
+        self, db_session: AsyncSession, test_user: User
+    ) -> None:
+        from datetime import UTC, datetime, timedelta
+
+        db_session.add(_prior_fill(test_user, "BUY", 0.9, 50_000.0, datetime.now(UTC) - timedelta(hours=1)))
+        await db_session.commit()
+        client = StubBinanceClient(balance=55_000.0)
+
+        res = await LiveTradingService(db_session, client=client).execute_live_order(
+            test_user.id, order_request(side="SELL", quantity=0.9)
+        )
+        assert res.status == "FILLED"

@@ -26,10 +26,11 @@ from app.core.exceptions import (
 )
 from app.core.logging import get_logger
 from app.core.metrics import TRADES_EXECUTED_TOTAL
-from app.engines.risk.manager import RiskManager
+from app.engines.risk.book import Book, Fill, build_book
+from app.engines.risk.manager import RiskManager, oversize_reason
 from app.models.live_trading import LiveOrder
 from app.schemas.live_trading import LiveOrderRequest, LiveOrderResponse
-from app.schemas.risk import TradeRiskRequest
+from app.schemas.risk import RiskConfig, TradeRiskRequest
 from app.services.event_ledger_service import EventLedgerService
 from app.services.notification_service import NotificationService
 from app.services.risk_state_service import RiskStateService
@@ -95,31 +96,11 @@ class LiveTradingService:
         if account_balance is None:
             account_balance = await self._resolve_quote_balance(symbol)
 
-        # 4. Remaining hard risk rules.
-        risk_result = RiskManager(config).validate_trade(
-            TradeRiskRequest(
-                symbol=symbol,
-                action=req.side,
-                account_balance=account_balance,
-                order_amount_usd=req.quantity * reference_price,
-                leverage=req.leverage,
-                entry_price=reference_price,
-                stop_loss_price=req.stop_price,
-            )
-        )
-        if not risk_result.is_approved:
-            # A triggered breaker must be persisted, or the next request in a
-            # different worker would sail straight through.
-            if risk_result.circuit_breaker_triggered and not config.circuit_breaker_active:
-                await self._risk_state.set_circuit_breaker(
-                    user_id, True, risk_result.rejection_reason
-                )
-                await self._session.commit()
-            TRADES_EXECUTED_TOTAL.labels(symbol=symbol, side=req.side, status="RISK_REJECTED").inc()
-            raise RiskLimitExceededError(
-                rule="risk_engine",
-                message=f"Trade rejected by Risk Engine: {risk_result.rejection_reason}",
-            )
+        # 4. Remaining hard risk rules, for BUYs only. On spot a SELL can only
+        #    reduce exposure, so sizing limits do not apply to it (the halt above
+        #    still does); scoring it as new exposure blocked exits for no reason.
+        if req.side.upper() == "BUY":
+            await self._enforce_buy_risk(user_id, config, symbol, req, reference_price, account_balance)
 
         # 5. Record intent before touching the network.
         client_order_id = f"qx{uuid.uuid4().hex[:30]}"
@@ -201,6 +182,88 @@ class LiveTradingService:
             price=float(order.filled_price or order.price or reference_price),
             quantity=req.quantity,
             transact_time=int(result.get("transactTime", 0)),
+        )
+
+    async def _enforce_buy_risk(
+        self,
+        user_id: uuid.UUID,
+        config: RiskConfig,
+        symbol: str,
+        req: LiveOrderRequest,
+        reference_price: float,
+        quote_balance: float,
+    ) -> None:
+        """Check a live BUY against the risk engine with the account's real book.
+
+        The book is rebuilt from QuantX's own filled orders on this venue
+        (testnet and mainnet are separate books), valued at current prices, so
+        exposure, open-position, daily-loss and cooldown limits measure what
+        is actually held. Holdings bought outside QuantX are not visible here.
+
+        Raises:
+            RiskLimitExceededError: If any rule rejects the order.
+        """
+        book = await self._book(user_id)
+        exposure = 0.0
+        for held_symbol, holding in book.holdings.items():
+            try:
+                price = await self._client.get_price(held_symbol)
+            except Exception as exc:
+                logger.warning("live_mark_price_failed", symbol=held_symbol, error=str(exc))
+                price = holding.avg_cost
+            exposure += price * holding.quantity
+
+        last_loss = book.last_loss_at.get(symbol)
+        request = TradeRiskRequest(
+            symbol=symbol,
+            action="BUY",
+            account_balance=quote_balance + exposure,
+            order_amount_usd=req.quantity * reference_price,
+            leverage=req.leverage,
+            entry_price=reference_price,
+            stop_loss_price=req.stop_price,
+            current_daily_loss_usd=max(0.0, -book.realized_since_day_start),
+            active_positions_count=len(book.holdings) - (1 if symbol in book.holdings else 0),
+            current_exposure_usd=exposure,
+            minutes_since_loss_on_symbol=(
+                (datetime.now(UTC) - last_loss).total_seconds() / 60 if last_loss is not None else None
+            ),
+        )
+        risk_result = RiskManager(config).validate_trade(request)
+        reason = risk_result.rejection_reason if not risk_result.is_approved else oversize_reason(request, risk_result)
+        if reason is None:
+            return
+
+        # A triggered breaker must be persisted, or the next request in a
+        # different worker would sail straight through.
+        if risk_result.circuit_breaker_triggered and not config.circuit_breaker_active:
+            await self._risk_state.set_circuit_breaker(user_id, True, reason)
+            await self._session.commit()
+        TRADES_EXECUTED_TOTAL.labels(symbol=symbol, side=req.side, status="RISK_REJECTED").inc()
+        raise RiskLimitExceededError(rule="risk_engine", message=f"Trade rejected by Risk Engine: {reason}")
+
+    async def _book(self, user_id: uuid.UUID) -> Book:
+        """The user's live position book on the current venue, from recorded fills."""
+        stmt = select(LiveOrder).where(
+            LiveOrder.user_id == user_id,
+            LiveOrder.is_testnet == self._client.testnet,
+            LiveOrder.filled_quantity > 0,
+            LiveOrder.filled_price.is_not(None),
+        )
+        orders = (await self._session.execute(stmt)).scalars().all()
+        midnight = datetime.now(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
+        return build_book(
+            (
+                Fill(
+                    symbol=o.symbol,
+                    side=o.side,
+                    quantity=o.filled_quantity,
+                    price=float(o.filled_price or 0.0),
+                    at=o.transact_time or o.created_at,
+                )
+                for o in orders
+            ),
+            day_start=midnight,
         )
 
     async def list_orders(self, user_id: uuid.UUID, limit: int = 100) -> list[LiveOrder]:
