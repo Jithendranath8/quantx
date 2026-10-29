@@ -76,6 +76,15 @@ class User(Base):
         nullable=True,
         default=None,
     )
+    # Set when the account was created through an OAuth provider. Only such
+    # accounts accept provider sign-in: registration does not verify email
+    # ownership, so a password account may hold an address its owner never
+    # proved, and must not be handed to whoever signs in with that address.
+    oauth_provider: Mapped[str | None] = mapped_column(
+        String(20),
+        nullable=True,
+        default=None,
+    )
 
 
 class RefreshToken(Base):

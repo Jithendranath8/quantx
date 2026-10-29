@@ -73,6 +73,17 @@ class Settings(BaseSettings):
     backend_workers: int = 4
     allowed_origins: str = "http://localhost:5173,http://localhost:3000"
 
+    # ── OAuth 2.0 sign-in ────────────────────────────────────────────────
+    # Each provider is offered only when both its client id and secret are set.
+    # Register the callback "<public_api_url>/api/v1/auth/oauth/<provider>/callback"
+    # with the provider; after sign-in the browser is returned to frontend_url.
+    oauth_google_client_id: str = ""
+    oauth_google_client_secret: str = ""
+    oauth_github_client_id: str = ""
+    oauth_github_client_secret: str = ""
+    public_api_url: str = "http://localhost:8000"
+    frontend_url: str = "http://localhost:5173"
+
     # ── Notifications ────────────────────────────────────────────────────
     alert_webhook_url: str | None = None
     telegram_bot_token: str | None = None
