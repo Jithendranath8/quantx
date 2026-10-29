@@ -38,6 +38,13 @@ DEFAULT_SECRET_KEY = "change-me-to-a-random-64-char-string"
 DEFAULT_JWT_SECRET_KEY = "change-me-to-a-random-64-char-jwt-secret"
 DEFAULT_POSTGRES_PASSWORD = "quantx_secure_password"
 
+# Models a provider has shut down, mapped to the provider's named replacement.
+# Groq retired the Llama 3.x chat models on 2026-08-16.
+RETIRED_MODEL_REPLACEMENTS = {
+    "llama-3.3-70b-versatile": "openai/gpt-oss-120b",
+    "llama-3.1-8b-instant": "openai/gpt-oss-20b",
+}
+
 
 class Settings(BaseSettings):
     """Central configuration for the QuantX application.
@@ -195,6 +202,11 @@ class Settings(BaseSettings):
         """
         if isinstance(v, str) and not v.strip():
             return "gpt-4o"
+        if isinstance(v, str):
+            # A provider retiring a model turns every call into a 404, and the
+            # agent silently degrades to WAIT. Map known shutdowns forward so a
+            # stale env var keeps working until it is updated.
+            return RETIRED_MODEL_REPLACEMENTS.get(v.strip(), v.strip())
         return v
 
     @field_validator("openai_base_url", mode="before")

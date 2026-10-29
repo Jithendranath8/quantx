@@ -130,3 +130,14 @@ def test_development_allows_the_shipped_defaults() -> None:
         jwt_secret_key=DEFAULT_JWT_SECRET_KEY,
     )
     s.validate_production_safety()  # must not raise
+
+
+def test_retired_groq_model_maps_to_its_replacement() -> None:
+    # A stale OPENAI_MODEL for a shut-down model would 404 on every call.
+    s = Settings(openai_model="llama-3.3-70b-versatile")  # type: ignore[call-arg]
+    assert s.openai_model == "openai/gpt-oss-120b"
+
+
+def test_current_model_name_is_left_alone() -> None:
+    s = Settings(openai_model="qwen2.5:3b")  # type: ignore[call-arg]
+    assert s.openai_model == "qwen2.5:3b"
