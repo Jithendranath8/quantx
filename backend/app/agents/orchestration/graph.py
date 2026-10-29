@@ -48,9 +48,9 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 # A minimal fixed quantity for the demonstration paper order placed when the
-# pipeline reaches the (mutations-enabled) execution step. Real position sizing
-# is the risk engine's responsibility, enforced inside the submit_paper_order
-# tool; this is only a token amount to exercise the execution path end to end.
+# pipeline reaches the (mutations-enabled) execution step. Sizing and limits are
+# enforced by PaperTradingService, which gates every BUY through RiskManager;
+# this is only a token amount to exercise the execution path end to end.
 DEMO_PAPER_ORDER_QUANTITY = 0.001
 
 SYNTHESIS_SYSTEM_PROMPT = (
