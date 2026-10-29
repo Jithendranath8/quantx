@@ -15,10 +15,17 @@ import random
 from collections.abc import Callable
 from typing import Any, Literal
 
+import numpy as np
 import pandas as pd
-from pydantic import BaseModel
+from pydantic import BaseModel, PrivateAttr
 
 from app.engines.backtest.engine import BacktestEngine
+from app.engines.research.statistics import (
+    deflated_sharpe,
+    per_period_sharpe,
+    probabilistic_sharpe,
+    probability_of_backtest_overfitting,
+)
 from app.engines.strategy.registry import StrategyRegistry
 from app.schemas.backtest import BacktestRequest
 
@@ -28,6 +35,9 @@ MAX_EVALUATIONS = 200
 TPE_WARMUP_FRACTION = 0.35
 TPE_MIN_WARMUP = 5
 TPE_GOOD_QUANTILE = 0.25
+# A winner whose deflated Sharpe is below this is not distinguishable from the
+# best of the same number of zero-edge trials.
+DSR_CONFIDENCE = 0.95
 
 
 class OptimizationCandidate(BaseModel):
@@ -40,6 +50,9 @@ class OptimizationCandidate(BaseModel):
     max_drawdown_pct: float
     profit_factor: float
     total_trades: int
+
+    # Per-bar returns, kept for the selection-bias statistics but not serialized.
+    _returns: np.ndarray = PrivateAttr(default_factory=lambda: np.empty(0))
 
 
 class OptimizationResult(BaseModel):
@@ -54,6 +67,9 @@ class OptimizationResult(BaseModel):
     top_candidates: list[OptimizationCandidate]
     overfitting_warning: bool
     recommendation: str
+    probabilistic_sharpe: float | None = None
+    deflated_sharpe: float | None = None
+    probability_of_backtest_overfitting: float | None = None
 
 
 class ParameterOptimizationEngine:
@@ -136,7 +152,8 @@ class ParameterOptimizationEngine:
         top = candidates[:10]
         best = top[0]
 
-        overfit, recommendation = ParameterOptimizationEngine._assess(candidates, best)
+        psr, dsr, pbo = ParameterOptimizationEngine._selection_bias(candidates, best)
+        overfit, recommendation = ParameterOptimizationEngine._assess(candidates, best, dsr, pbo)
 
         return OptimizationResult(
             strategy_name=strategy_name,
@@ -148,6 +165,9 @@ class ParameterOptimizationEngine:
             top_candidates=top,
             overfitting_warning=overfit,
             recommendation=recommendation,
+            probabilistic_sharpe=psr,
+            deflated_sharpe=dsr,
+            probability_of_backtest_overfitting=pbo,
         )
 
     @staticmethod
@@ -177,7 +197,7 @@ class ParameterOptimizationEngine:
                 strategy=strategy,
             )
             result = engine.run(df_candles)
-            return OptimizationCandidate(
+            candidate = OptimizationCandidate(
                 params=params,
                 sharpe_ratio=result.metrics.sharpe_ratio,
                 sortino_ratio=result.metrics.sortino_ratio,
@@ -186,6 +206,9 @@ class ParameterOptimizationEngine:
                 profit_factor=result.metrics.profit_factor,
                 total_trades=result.metrics.total_trades,
             )
+            equity = pd.Series([p.equity for p in result.equity_curve], dtype=float)
+            candidate._returns = equity.pct_change().dropna().to_numpy()
+            return candidate
 
         return score
 
@@ -276,15 +299,38 @@ class ParameterOptimizationEngine:
         return [dict(zip(keys, values, strict=True)) for values in itertools.product(*grid.values())]
 
     @staticmethod
+    def _selection_bias(
+        candidates: list[OptimizationCandidate],
+        best: OptimizationCandidate,
+    ) -> tuple[float | None, float | None, float | None]:
+        """PSR and DSR of the winner, and PBO across every trial.
+
+        Every evaluated candidate counts as a trial, because the winner was
+        selected from all of them.
+        """
+        if best._returns.size < 5:
+            return None, None, None
+        psr = probabilistic_sharpe(best._returns)
+        dsr = deflated_sharpe(best._returns, [per_period_sharpe(c._returns) for c in candidates])
+
+        length = min(c._returns.size for c in candidates)
+        matrix = np.column_stack([c._returns[-length:] for c in candidates]) if length else np.empty((0, 0))
+        pbo = probability_of_backtest_overfitting(matrix) if length else None
+        return round(psr, 4), round(dsr, 4), None if pbo is None else round(pbo, 4)
+
+    @staticmethod
     def _assess(
         candidates: list[OptimizationCandidate],
         best: OptimizationCandidate,
+        dsr: float | None = None,
+        pbo: float | None = None,
     ) -> tuple[bool, str]:
         """Judge whether the winner looks like a fitting artefact.
 
-        A best result that towers over the rest of the space is usually a lucky
-        cell rather than a robust region, and a winner with very few trades has
-        no statistical support regardless of its Sharpe.
+        A winner with very few trades has no statistical support regardless of
+        its Sharpe. Beyond that, the deflated Sharpe asks whether the winner
+        beats what the best of this many no-edge trials would score, and PBO
+        asks whether the in-sample best tends to hold up out of sample.
         """
         if best.total_trades < 10:
             return True, (
@@ -298,17 +344,31 @@ class ParameterOptimizationEngine:
                 "the search space is too small to judge robustness."
             )
 
-        others = [c.sharpe_ratio for c in candidates[1:]]
-        median_other = sorted(others)[len(others) // 2]
-        if median_other > 0 and best.sharpe_ratio > median_other * 2.5:
+        if dsr is not None and dsr < DSR_CONFIDENCE:
             return True, (
-                f"Best Sharpe ({best.sharpe_ratio}) is far above the median of the "
-                f"rest of the grid ({median_other}). This looks like an isolated "
-                "peak rather than a stable region; validate with walk-forward."
+                f"Deflated Sharpe is {dsr:.2f}: after correcting for {len(candidates)} trials, "
+                f"there is less than {DSR_CONFIDENCE:.0%} confidence that the best Sharpe "
+                f"({best.sharpe_ratio}) beats what the luckiest of that many no-edge "
+                "parameter sets would score."
             )
 
+        if pbo is not None and pbo > 0.5:
+            return True, (
+                f"Probability of backtest overfitting is {pbo:.0%}: the in-sample winner "
+                "usually ranks below the median out of sample, so the selection is "
+                "not adding information."
+            )
+
+        if dsr is None:
+            return False, (
+                f"Best Sharpe ({best.sharpe_ratio}) across {len(candidates)} evaluations; "
+                "too few bars to correct for selection bias. Confirm with walk-forward "
+                "before trusting it."
+            )
+
+        pbo_text = f" and PBO is {pbo:.0%}" if pbo is not None else ""
         return False, (
-            f"Best Sharpe ({best.sharpe_ratio}) is consistent with neighbouring "
-            f"parameter sets across {len(candidates)} evaluations. Confirm with "
-            "walk-forward before trusting it."
+            f"Best Sharpe ({best.sharpe_ratio}) survives selection-bias correction across "
+            f"{len(candidates)} evaluations (deflated Sharpe {dsr:.2f}{pbo_text}). "
+            "Confirm with walk-forward before trusting it."
         )
