@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <title>QuantX</title>
+  <defs>
+    <linearGradient id="qx-tile" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#1c1e24"/>
+      <stop offset="1" stop-color="#0a0b0e"/>
+    </linearGradient>
+    <radialGradient id="qx-glow" cx="424" cy="240" r="190" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#ff7a1a" stop-opacity="0.30"/>
+      <stop offset="1" stop-color="#ff7a1a" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="qx-ring" x1="0" y1="110" x2="0" y2="402" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="1" stop-color="#d4d4d8"/>
+    </linearGradient>
+    <linearGradient id="qx-signal" x1="240" y1="364" x2="424" y2="240" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#c94a0b"/>
+      <stop offset="0.5" stop-color="#ff7a1a"/>
+      <stop offset="1" stop-color="#ffb070"/>
+    </linearGradient>
+    <!-- The tail cuts a clean channel through the bowl, and nowhere else. -->
+    <mask id="qx-cut" maskUnits="userSpaceOnUse" x="0" y="0" width="512" height="512">
+      <rect width="512" height="512" fill="#fff"/>
+      <path d="M 240 286 L 318 364 L 424 240" fill="none" stroke="#000" stroke-width="70" stroke-linecap="round" stroke-linejoin="round"/>
+    </mask>
+  </defs>
+  <rect width="512" height="512" rx="116" fill="url(#qx-tile)"/>
+  <rect width="512" height="512" rx="116" fill="url(#qx-glow)"/>
+  <rect x="3" y="3" width="506" height="506" rx="113" fill="none" stroke="#fff" stroke-opacity="0.07" stroke-width="6"/>
+  <!-- Q -->
+  <circle cx="212" cy="256" r="124" fill="none" stroke="url(#qx-ring)" stroke-width="44" mask="url(#qx-cut)"/>
+  <!-- Tail = price line: drops out of the Q, one decisive turn, breaks out -->
+  <path d="M 240 286 L 318 364 L 424 240" fill="none" stroke="url(#qx-signal)" stroke-width="38" stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- Live signal point -->
+  <circle cx="424" cy="240" r="40" fill="#ffb070" opacity="0.18"/>
+  <circle cx="424" cy="240" r="24" fill="#ffe2c7"/>
+</svg>
