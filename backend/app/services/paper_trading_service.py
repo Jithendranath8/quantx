@@ -8,24 +8,38 @@ MARKET orders fill immediately. LIMIT, STOP_LOSS and TAKE_PROFIT orders rest as
 PENDING until the market reaches their level; ``process_pending_orders`` is what
 moves them, and it is driven by a periodic worker.
 
+Every BUY passes the deterministic risk engine, at placement and again when a
+resting order triggers, with the account's real equity, exposure and position
+count. SELLs are not gated: paper trading is spot-only, so a sell can only
+reduce exposure, and a halt must never trap an account in a losing position.
+
+The daily-loss limit is per account: each SELL fill records its realised P&L,
+and the gate sums today's (UTC) fills. Hitting the limit stops that account's
+buys until midnight UTC; it does not trip the user's shared circuit breaker,
+which would also halt live trading.
+
 Every account-scoped operation verifies ``account.user_id == user_id``. Without
 that check any authenticated user can read or trade another user's account
 simply by supplying its UUID.
 """
 
 import uuid
+from datetime import UTC, datetime
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.connectors.binance_client import BinanceClient, get_binance_client
-from app.core.exceptions import AuthorizationError, NotFoundError, ValidationError
+from app.core.exceptions import AuthorizationError, NotFoundError, RiskLimitExceededError, ValidationError
 from app.core.logging import get_logger
+from app.engines.risk.manager import RiskManager, oversize_reason
 from app.models.paper_trading import PaperAccount, PaperOrder, PaperPosition
 from app.schemas.paper_trading import (
     CreatePaperAccountRequest,
     SubmitPaperOrderRequest,
 )
+from app.schemas.risk import TradeRiskRequest
+from app.services.risk_state_service import RiskStateService
 
 logger = get_logger(__name__)
 
@@ -39,6 +53,7 @@ class PaperTradingService:
     def __init__(self, session: AsyncSession, client: BinanceClient | None = None) -> None:
         self._session = session
         self._client = client or get_binance_client()
+        self._risk_state = RiskStateService(session)
 
     async def create_account(self, user_id: uuid.UUID, req: CreatePaperAccountRequest) -> PaperAccount:
         """Create a new virtual paper account."""
@@ -58,14 +73,20 @@ class PaperTradingService:
         stmt = select(PaperAccount).where(PaperAccount.user_id == user_id)
         return list((await self._session.execute(stmt)).scalars().all())
 
-    async def get_account(self, user_id: uuid.UUID, account_id: uuid.UUID) -> PaperAccount:
+    async def get_account(
+        self, user_id: uuid.UUID, account_id: uuid.UUID, *, for_update: bool = False
+    ) -> PaperAccount:
         """Fetch a paper account, enforcing ownership.
+
+        ``for_update`` takes a row lock held until the transaction ends.
 
         Raises:
             NotFoundError: If no such account exists.
             AuthorizationError: If the account belongs to a different user.
         """
         stmt = select(PaperAccount).where(PaperAccount.id == account_id)
+        if for_update:
+            stmt = stmt.with_for_update()
         account = (await self._session.execute(stmt)).scalar_one_or_none()
         if account is None:
             raise NotFoundError("Paper account", str(account_id))
@@ -90,7 +111,10 @@ class PaperTradingService:
             market_price: Override for the reference price. When omitted the
                 live price is fetched from Binance rather than assumed.
         """
-        account = await self.get_account(user_id, req.account_id)
+        # Lock the account row until this order commits, so two simultaneous
+        # orders cannot both pass the balance and risk checks against the same
+        # pre-order state.
+        account = await self.get_account(user_id, req.account_id, for_update=True)
         symbol = req.symbol.upper()
         side = req.side.upper()
         order_type = req.order_type.upper()
@@ -108,6 +132,7 @@ class PaperTradingService:
         fee = notional * FEE_RATE
 
         position = await self._get_open_position(account.id, symbol)
+        realized: float | None = None
 
         if side == "BUY":
             total_cost = notional + fee
@@ -115,6 +140,7 @@ class PaperTradingService:
                 raise ValidationError(
                     f"Insufficient virtual balance: ${account.current_balance:.2f} < ${total_cost:.2f}"
                 )
+            await self._enforce_risk(account, symbol, notional, fill_price, req.stop_loss)
             account.current_balance -= total_cost
             self._apply_buy(account, position, symbol, req, fill_price)
         else:
@@ -125,7 +151,7 @@ class PaperTradingService:
                     f"Cannot sell {req.quantity} {symbol}: position holds only {position.quantity}"
                 )
             account.current_balance += notional - fee
-            self._apply_sell(account, position, req.quantity, fill_price, fee)
+            realized = self._apply_sell(account, position, req.quantity, fill_price, fee)
 
         order = PaperOrder(
             account_id=account.id,
@@ -139,6 +165,8 @@ class PaperTradingService:
             status="FILLED",
             stop_loss=req.stop_loss,
             take_profit=req.take_profit,
+            filled_at=datetime.now(UTC),
+            realized_pnl=realized,
         )
         self._session.add(order)
 
@@ -164,7 +192,9 @@ class PaperTradingService:
         if trigger is None or trigger <= 0:
             raise ValidationError(f"{req.order_type} orders require a positive trigger price")
 
-        if side == "SELL":
+        if side == "BUY":
+            await self._enforce_risk(account, symbol, trigger * req.quantity, trigger, req.stop_loss)
+        else:
             position = await self._get_open_position(account.id, symbol)
             if position is None or position.quantity + 1e-12 < req.quantity:
                 raise ValidationError(
@@ -236,7 +266,7 @@ class PaperTradingService:
             try:
                 await self._fill_resting_order(order, price)
                 triggered += 1
-            except ValidationError as exc:
+            except (ValidationError, RiskLimitExceededError) as exc:
                 order.status = "REJECTED"
                 rejected += 1
                 logger.warning(
@@ -270,7 +300,7 @@ class PaperTradingService:
             ValidationError: If the account can no longer afford the fill, or
                 the position it would close no longer exists.
         """
-        account = await self._session.get(PaperAccount, order.account_id)
+        account = await self._session.get(PaperAccount, order.account_id, with_for_update=True)
         if account is None:
             raise ValidationError("Paper account no longer exists")
 
@@ -291,6 +321,8 @@ class PaperTradingService:
                     f"Insufficient virtual balance at trigger: "
                     f"${account.current_balance:.2f} < ${notional + fee:.2f}"
                 )
+            # Conditions may have changed since the order was placed.
+            await self._enforce_risk(account, order.symbol, notional, fill_price, order.stop_loss)
             account.current_balance -= notional + fee
             self._apply_buy_to_position(account, position, order.symbol, order.quantity, fill_price)
         else:
@@ -299,9 +331,10 @@ class PaperTradingService:
                     f"Position in {order.symbol} no longer covers this order"
                 )
             account.current_balance += notional - fee
-            self._apply_sell(account, position, order.quantity, fill_price, fee)
+            order.realized_pnl = self._apply_sell(account, position, order.quantity, fill_price, fee)
 
         order.status = "FILLED"
+        order.filled_at = datetime.now(UTC)
         order.filled_price = fill_price
         order.filled_quantity = order.quantity
         logger.info(
@@ -389,6 +422,101 @@ class PaperTradingService:
 
     # ── Internals ────────────────────────────────────────────────────
 
+    async def _enforce_risk(
+        self,
+        account: PaperAccount,
+        symbol: str,
+        notional: float,
+        entry_price: float,
+        stop_loss: float | None,
+    ) -> None:
+        """Reject a BUY the risk engine would not allow on this account.
+
+        The engine is given the account's actual equity, open exposure and
+        position count, so the exposure and concurrency limits measure the real
+        book rather than a single order in isolation. Risk per trade is
+        enforced too: an order larger than the engine's recommended size for
+        its stop distance is refused rather than silently filled.
+
+        Exposure is valued at current market prices, and a symbol closed at a
+        loss cannot be bought again until the cooldown has passed.
+
+        Raises:
+            RiskLimitExceededError: If any rule rejects the order.
+        """
+        config = await self._risk_state.load_config(account.user_id)
+        stmt = select(PaperPosition).where(
+            PaperPosition.account_id == account.id, PaperPosition.status == "OPEN"
+        )
+        positions = list((await self._session.execute(stmt)).scalars().all())
+        exposure = 0.0
+        for p in positions:
+            exposure += await self._mark(p) * p.quantity
+        # Adding to an existing position does not open a new one.
+        adds_to_existing = any(p.symbol == symbol for p in positions)
+
+        request = TradeRiskRequest(
+            symbol=symbol,
+            action="BUY",
+            account_balance=account.current_balance + exposure,
+            order_amount_usd=notional,
+            entry_price=entry_price,
+            stop_loss_price=stop_loss,
+            current_daily_loss_usd=await self._daily_realized_loss(account.id),
+            active_positions_count=len(positions) - (1 if adds_to_existing else 0),
+            current_exposure_usd=exposure,
+            minutes_since_loss_on_symbol=await self._minutes_since_loss(account.id, symbol),
+        )
+        result = RiskManager(config).validate_trade(request)
+        if not result.is_approved:
+            # A daily-loss hit is not persisted as a breaker trip: the breaker is
+            # per user and also halts live trading, while this limit is per paper
+            # account and lifts by itself at UTC midnight because it is
+            # recomputed from today's fills on every order.
+            logger.info("paper_order_risk_rejected", account_id=str(account.id), reason=result.rejection_reason)
+            raise RiskLimitExceededError(
+                rule="risk_engine",
+                message=f"Paper order rejected by Risk Engine: {result.rejection_reason}",
+            )
+
+        oversize = oversize_reason(request, result)
+        if oversize is not None:
+            raise RiskLimitExceededError(rule="risk_per_trade", message=f"Paper {oversize[0].lower()}{oversize[1:]}")
+
+    async def _mark(self, position: PaperPosition) -> float:
+        """Current price for a position, so exposure is not measured at a stale mark.
+
+        The stored price only moves on fills and explicit mark-to-market; if the
+        market cannot be reached the stored price is used rather than blocking.
+        """
+        try:
+            return await self._client.get_price(position.symbol)
+        except Exception as exc:
+            logger.warning("paper_mark_price_failed", symbol=position.symbol, error=str(exc))
+            return position.current_price
+
+    async def _minutes_since_loss(self, account_id: uuid.UUID, symbol: str) -> float | None:
+        """Minutes since this account last exited ``symbol`` at a loss, or None."""
+        stmt = select(func.max(PaperOrder.filled_at)).where(
+            PaperOrder.account_id == account_id,
+            PaperOrder.symbol == symbol,
+            PaperOrder.realized_pnl < 0,
+        )
+        last = (await self._session.execute(stmt)).scalar_one_or_none()
+        if last is None:
+            return None
+        return (datetime.now(UTC) - last).total_seconds() / 60
+
+    async def _daily_realized_loss(self, account_id: uuid.UUID) -> float:
+        """Net realised loss on an account since 00:00 UTC (0 when today is net positive)."""
+        midnight = datetime.now(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
+        stmt = select(func.coalesce(func.sum(PaperOrder.realized_pnl), 0.0)).where(
+            PaperOrder.account_id == account_id,
+            PaperOrder.filled_at >= midnight,
+        )
+        net = float((await self._session.execute(stmt)).scalar_one())
+        return max(0.0, -net)
+
     async def _get_open_position(self, account_id: uuid.UUID, symbol: str) -> PaperPosition | None:
         """Find the open position for a symbol on an account, if any."""
         stmt = select(PaperPosition).where(
@@ -464,8 +592,8 @@ class PaperTradingService:
         quantity: float,
         fill_price: float,
         fee: float,
-    ) -> None:
-        """Reduce or close a long, realizing PnL onto the account."""
+    ) -> float:
+        """Reduce or close a long, realizing PnL onto the account; returns the realised P&L."""
         realized = (fill_price - position.entry_price) * quantity - fee
         position.quantity -= quantity
         position.current_price = fill_price
@@ -478,3 +606,4 @@ class PaperTradingService:
             position.status = "CLOSED"
         else:
             position.unrealized_pnl = (fill_price - position.entry_price) * position.quantity
+        return realized

@@ -25,8 +25,8 @@ const EVENT_TYPES = [
 
 function levelColor(eventType: string): string {
   if (eventType.includes('KILL_SWITCH')) return 'text-red-400';
-  if (eventType.includes('REJECT') || eventType.includes('FAIL')) return 'text-amber-400';
-  return 'text-cyan-400';
+  if (eventType.includes('REJECT') || eventType.includes('FAIL')) return 'text-yellow-400';
+  return 'text-brand-400';
 }
 
 export default function LogsPage() {
@@ -58,15 +58,17 @@ export default function LogsPage() {
         }
       />
 
-      <Field label="Event type">
-        <Select value={eventType} onChange={(e) => setEventType(e.target.value)}>
-          {EVENT_TYPES.map((t) => (
-            <option key={t} value={t}>{t || 'All events'}</option>
-          ))}
-        </Select>
-      </Field>
+      <div className="w-full max-w-xs">
+        <Field label="Event type">
+          <Select value={eventType} onChange={(e) => setEventType(e.target.value)}>
+            {EVENT_TYPES.map((t) => (
+              <option key={t} value={t}>{t || 'All events'}</option>
+            ))}
+          </Select>
+        </Field>
+      </div>
 
-      <Card title="Events" icon={<Terminal className="w-4 h-4 text-cyan-400" />}>
+      <Card title="Events" icon={<Terminal className="w-4 h-4 text-brand-400" />}>
         <AsyncSection
           state={events}
           emptyWhen={(d) => d.length === 0}
@@ -78,15 +80,15 @@ export default function LogsPage() {
               {data.map((e) => (
                 <div
                   key={e.event_id}
-                  className="flex items-start gap-3 py-1.5 border-b border-slate-900 last:border-0"
+                  className="flex items-start gap-3 py-1.5 border-b border-zinc-900 last:border-0"
                 >
-                  <span className="text-slate-500 shrink-0 w-40">{formatDateTime(e.timestamp)}</span>
+                  <span className="text-zinc-500 shrink-0 w-40">{formatDateTime(e.timestamp)}</span>
                   <span className={`font-bold shrink-0 ${levelColor(e.event_type)}`}>
                     [{e.event_type}]
                   </span>
-                  <span className="text-purple-400 shrink-0">[{e.source}]</span>
-                  {e.symbol && <span className="text-slate-300 shrink-0">{e.symbol}</span>}
-                  <span className="text-slate-400 break-all">{JSON.stringify(e.payload)}</span>
+                  <span className="text-brand-300 shrink-0">[{e.source}]</span>
+                  {e.symbol && <span className="text-zinc-300 shrink-0">{e.symbol}</span>}
+                  <span className="text-zinc-400 break-all">{JSON.stringify(e.payload)}</span>
                 </div>
               ))}
             </div>
@@ -94,7 +96,7 @@ export default function LogsPage() {
         </AsyncSection>
       </Card>
 
-      <p className="text-xs text-slate-600">
+      <p className="text-xs text-zinc-600">
         This is the database event ledger, not the application log stream. Container logs are
         available with <span className="font-mono">docker compose logs -f backend</span>.
       </p>

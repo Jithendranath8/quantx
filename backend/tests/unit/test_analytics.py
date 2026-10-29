@@ -10,6 +10,10 @@ from app.schemas.paper_trading import CreatePaperAccountRequest, SubmitPaperOrde
 from app.services.paper_trading_service import PaperTradingService
 from app.services.portfolio_service import PortfolioService
 
+# These tests exercise fills and bookkeeping with large round lots; the risk
+# gate is covered separately in tests/unit/test_paper_risk_gate.py.
+pytestmark = pytest.mark.usefixtures("relaxed_risk_limits")
+
 
 @pytest.mark.unit
 class TestPortfolioService:

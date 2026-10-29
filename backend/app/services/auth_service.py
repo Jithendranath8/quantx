@@ -6,8 +6,11 @@ Orchestrates between repositories and security utilities.
 """
 
 import json
+import re
+import secrets
 import uuid
 
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
@@ -15,6 +18,7 @@ from app.core.exceptions import (
     ConflictError,
     InvalidCredentialsError,
     NotFoundError,
+    OAuthSignInError,
     TokenInvalidError,
     ValidationError,
 )
@@ -186,6 +190,131 @@ class AuthService:
             user=UserResponse.model_validate(user),
             tokens=tokens,
         )
+
+    async def resolve_oauth_user(
+        self,
+        email: str,
+        full_name: str | None,
+        provider: str,
+        ip_address: str | None = None,
+    ) -> User:
+        """Find or create the account for a provider-verified email.
+
+        Only accounts the provider flow created are reachable this way.
+        Password registration does not verify email ownership, so an existing
+        password account with this address may have been registered by
+        someone else first; attaching to it would leave that person holding a
+        working password to the account the real owner now uses. A new
+        account gets a random, never-disclosed password.
+
+        Raises:
+            OAuthSignInError: If a password account already holds the email, or the account is disabled.
+        """
+        user = await self._user_repo.get_by_email(email)
+        created = False
+        if user is None:
+            user, created = await self._create_oauth_user(email, full_name, provider)
+        if user.oauth_provider is None:
+            raise OAuthSignInError(
+                "password_account_exists",
+                "An account with this email is already registered with a password. "
+                "Sign in with your email and password instead.",
+            )
+        if not user.is_active:
+            raise OAuthSignInError("account_disabled", "Account is deactivated")
+
+        await self._audit_repo.log(
+            action="user.registered" if created else "user.login",
+            user_id=user.id,
+            resource_type="user",
+            resource_id=str(user.id),
+            details=json.dumps({"method": f"oauth:{provider}"}),
+            ip_address=ip_address,
+        )
+        await self._session.commit()
+        logger.info("user_oauth_sign_in", user_id=str(user.id), provider=provider, created=created)
+        return user
+
+    async def _create_oauth_user(self, email: str, full_name: str | None, provider: str) -> tuple[User, bool]:
+        """Create the provider account, tolerating a concurrent first sign-in.
+
+        Two first sign-ins can race on the unique email or a generated
+        username. Each attempt runs in a savepoint: on a clash, an account that
+        now exists for the email is used (it is re-checked by the caller), and
+        a username clash retries with a fresh suffix.
+
+        Returns:
+            The user, and whether this call created it.
+        """
+        for _ in range(3):
+            try:
+                async with self._session.begin_nested():
+                    user = await self._user_repo.create(
+                        email=email,
+                        username=await self._available_username(email),
+                        hashed_password=hash_password(secrets.token_urlsafe(32)),
+                        full_name=full_name[:100] if full_name else None,
+                    )
+                    user.oauth_provider = provider
+                    await self._session.flush()
+                return user, True
+            except IntegrityError:
+                existing = await self._user_repo.get_by_email(email)
+                if existing is not None:
+                    return existing, False
+        raise ConflictError("User", "username", email.split("@")[0])
+
+    async def link_oauth(self, user_id: str, email: str, provider: str, ip_address: str | None = None) -> User:
+        """Attach a provider to an account its owner is signed in to.
+
+        The link was started by an authenticated request, and the provider has
+        now verified an email address; they must be the same address. That
+        proves the signed-in user also owns the email, which is exactly what a
+        password registration never established.
+
+        Raises:
+            OAuthSignInError: If the account is gone or disabled, or the
+                provider's email is not the account's email.
+        """
+        user = await self._user_repo.get_by_id(user_id)
+        if user is None or not user.is_active:
+            raise OAuthSignInError("account_disabled", "Account is unavailable")
+        if user.email.lower() != email.lower():
+            raise OAuthSignInError(
+                "email_mismatch", "The provider account's verified email is not this account's email."
+            )
+        if user.oauth_provider is None:
+            user.oauth_provider = provider
+        await self._audit_repo.log(
+            action="user.oauth_linked",
+            user_id=user.id,
+            resource_type="user",
+            resource_id=str(user.id),
+            details=json.dumps({"provider": provider}),
+            ip_address=ip_address,
+        )
+        await self._session.commit()
+        logger.info("user_oauth_linked", user_id=str(user.id), provider=provider)
+        return user
+
+    async def issue_for_user(self, user_id: str) -> AuthResponse:
+        """Mint a fresh token pair for an already-authenticated user id."""
+        user = await self._user_repo.get_by_id(user_id)
+        if user is None or not user.is_active:
+            raise InvalidCredentialsError()
+        tokens = await self._create_tokens(user)
+        await self._session.commit()
+        return AuthResponse(user=UserResponse.model_validate(user), tokens=tokens)
+
+    async def _available_username(self, email: str) -> str:
+        """Derive a unique, schema-valid username from an email's local part."""
+        base = re.sub(r"[^a-zA-Z0-9_-]", "", email.split("@")[0])[:40] or "trader"
+        if len(base) < 3:
+            base = f"{base}-qx"
+        candidate = base
+        while await self._user_repo.get_by_username(candidate) is not None:
+            candidate = f"{base}-{secrets.token_hex(3)}"
+        return candidate
 
     async def refresh_tokens(
         self,

@@ -60,8 +60,8 @@ export default function IndicatorsPage() {
                 onClick={() => toggle(tf)}
                 className={`px-2.5 py-1 rounded-lg border text-xs font-mono transition-colors ${
                   selected.includes(tf)
-                    ? 'bg-cyan-600/20 border-cyan-500/40 text-cyan-300'
-                    : 'bg-slate-900 border-slate-800 text-slate-500 hover:border-slate-700'
+                    ? 'bg-brand-600/20 border-brand-500/40 text-brand-300'
+                    : 'bg-zinc-900 border-zinc-800 text-zinc-500 hover:border-zinc-700'
                 }`}
               >
                 {tf}
@@ -71,7 +71,7 @@ export default function IndicatorsPage() {
         </Field>
       </div>
 
-      <Card title={`Indicators · ${symbol}`} icon={<LineChart className="w-4 h-4 text-cyan-400" />}>
+      <Card title={`Indicators · ${symbol}`} icon={<LineChart className="w-4 h-4 text-brand-400" />}>
         <AsyncSection
           state={indicators}
           emptyWhen={(d) => Object.values(d.indicators).every((v) => Object.keys(v).length === 0)}
@@ -79,17 +79,17 @@ export default function IndicatorsPage() {
           emptyHint="No candles are stored for this symbol and timeframe yet."
         >
           {(data) => (
-            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-px bg-slate-800">
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-px bg-zinc-800">
               {Object.entries(data.indicators).map(([tf, values]) => (
-                <div key={tf} className="bg-slate-900/50 p-5">
-                  <div className="text-xs font-bold text-cyan-400 uppercase tracking-wider mb-3">{tf}</div>
+                <div key={tf} className="bg-zinc-900/50 p-5">
+                  <div className="text-xs font-bold text-brand-400 uppercase tracking-wider mb-3">{tf}</div>
                   {Object.keys(values).length === 0 ? (
-                    <p className="text-xs text-slate-600">No candles stored</p>
+                    <p className="text-xs text-zinc-600">No candles stored</p>
                   ) : (
                     <div className="space-y-1.5">
                       {HIGHLIGHT.filter((k) => k in values).map((key) => (
                         <div key={key} className="flex justify-between text-xs">
-                          <span className="text-slate-500 font-mono">{key}</span>
+                          <span className="text-zinc-500 font-mono">{key}</span>
                           <span className="text-white font-mono">
                             {typeof values[key] === 'number'
                               ? formatNumber(values[key] as number, 4)
@@ -107,7 +107,7 @@ export default function IndicatorsPage() {
       </Card>
 
       {selected.length === 0 && (
-        <p className="text-xs text-amber-400">Select at least one timeframe.</p>
+        <p className="text-xs text-yellow-400">Select at least one timeframe.</p>
       )}
     </div>
   );

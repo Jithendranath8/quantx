@@ -41,24 +41,24 @@ export default function StrategiesPage() {
       <PageHeader title="Strategy Engine" description="Registered strategies and live evaluation" />
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <Card title="Registered Strategies" icon={<Cpu className="w-4 h-4 text-cyan-400" />}>
+        <Card title="Registered Strategies" icon={<Cpu className="w-4 h-4 text-brand-400" />}>
           <AsyncSection state={strategies} emptyWhen={(d) => d.length === 0} emptyMessage="No strategies registered">
             {(data) => (
-              <div className="divide-y divide-slate-800/50">
+              <div className="divide-y divide-zinc-800/50">
                 {data.map((s) => (
                   <button
                     key={s.name}
                     type="button"
                     onClick={() => setStrategyName(s.name)}
                     className={`w-full px-5 py-3.5 text-left transition-colors ${
-                      s.name === strategyName ? 'bg-slate-800/50' : 'hover:bg-slate-800/30'
+                      s.name === strategyName ? 'bg-zinc-800/50' : 'hover:bg-zinc-800/30'
                     }`}
                   >
                     <div className="flex items-center gap-2 mb-1">
                       <span className="text-sm font-mono font-semibold text-white">{s.name}</span>
                       {s.name === strategyName && <Badge tone="info">selected</Badge>}
                     </div>
-                    <p className="text-xs text-slate-500">{s.description}</p>
+                    <p className="text-xs text-zinc-500">{s.description}</p>
                   </button>
                 ))}
               </div>
@@ -88,35 +88,35 @@ export default function StrategiesPage() {
             {evaluate.error && <div className="text-xs text-red-400">{evaluate.error}</div>}
 
             {signal && (
-              <div className="p-4 rounded-lg bg-slate-950 border border-slate-800 space-y-3">
+              <div className="p-4 rounded-lg bg-zinc-950 border border-zinc-800 space-y-3">
                 <div className="flex items-center justify-between">
-                  <span className="text-xs text-slate-500 uppercase tracking-wider">Signal</span>
+                  <span className="text-xs text-zinc-500 uppercase tracking-wider">Signal</span>
                   <Badge tone={actionTone(signal.action)}>{signal.action}</Badge>
                 </div>
                 <div className="flex items-center gap-3">
-                  <div className="flex-1 bg-slate-800 rounded-full h-1.5">
+                  <div className="flex-1 bg-zinc-800 rounded-full h-1.5">
                     <div
-                      className="h-1.5 rounded-full bg-gradient-to-r from-cyan-500 to-blue-500"
+                      className="h-1.5 rounded-full bg-gradient-to-r from-brand-500 to-brand-500"
                       style={{ width: `${signal.confidence * 100}%` }}
                     />
                   </div>
-                  <span className="text-xs font-mono text-slate-400">
+                  <span className="text-xs font-mono text-zinc-400">
                     {(signal.confidence * 100).toFixed(0)}%
                   </span>
                 </div>
-                <p className="text-xs text-slate-400 leading-relaxed">{signal.reasoning}</p>
+                <p className="text-xs text-zinc-400 leading-relaxed">{signal.reasoning}</p>
                 {signal.entry_price !== null && (
-                  <div className="grid grid-cols-3 gap-2 text-xs font-mono pt-2 border-t border-slate-800">
+                  <div className="grid grid-cols-3 gap-2 text-xs font-mono pt-2 border-t border-zinc-800">
                     <div>
-                      <div className="text-slate-600">Entry</div>
+                      <div className="text-zinc-600">Entry</div>
                       <div className="text-white">{formatNumber(signal.entry_price)}</div>
                     </div>
                     <div>
-                      <div className="text-slate-600">Stop</div>
+                      <div className="text-zinc-600">Stop</div>
                       <div className="text-red-400">{signal.stop_loss ? formatNumber(signal.stop_loss) : '—'}</div>
                     </div>
                     <div>
-                      <div className="text-slate-600">Target</div>
+                      <div className="text-zinc-600">Target</div>
                       <div className="text-emerald-400">{signal.take_profit ? formatNumber(signal.take_profit) : '—'}</div>
                     </div>
                   </div>

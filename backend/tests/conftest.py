@@ -299,3 +299,23 @@ def stub_binance(monkeypatch: pytest.MonkeyPatch) -> FakeBinanceClient:
     ):
         monkeypatch.setattr(f"{module}.get_binance_client", lambda: fake, raising=False)
     return fake
+
+
+@pytest.fixture
+def relaxed_risk_limits(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Lift sizing limits for tests about fill mechanics, not risk.
+
+    Those tests buy large round lots to keep their arithmetic readable, which
+    the default limits rightly refuse. The persisted circuit breaker still
+    applies; the gate itself is covered by test_paper_risk_gate.py.
+    """
+    from app.schemas.risk import RiskConfig
+    from app.services.risk_state_service import RiskStateService
+
+    original = RiskStateService.load_config
+    relaxed = RiskConfig(max_risk_per_trade_pct=1.0, max_portfolio_exposure_pct=10.0, max_concurrent_trades=100)
+
+    async def load_config(self: RiskStateService, user_id: uuid.UUID, base: RiskConfig | None = None) -> RiskConfig:
+        return await original(self, user_id, base or relaxed)
+
+    monkeypatch.setattr(RiskStateService, "load_config", load_config)

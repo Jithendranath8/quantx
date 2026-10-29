@@ -69,7 +69,10 @@ api.interceptors.response.use(
   (response) => response,
   async (error: AxiosError<ApiError>) => {
     const original = error.config as RetriableConfig | undefined;
-    const isAuthCall = original?.url?.includes('/auth/');
+    // Only the credential endpoints are exempt. /auth/me must refresh like any
+    // other call: it restores the session on load, and skipping it logged
+    // everyone out on the first reload after the access token expired.
+    const isAuthCall = /\/auth\/(login|register|refresh|logout|oauth)/.test(original?.url ?? '');
 
     if (error.response?.status === 401 && original && !original._retried && !isAuthCall) {
       original._retried = true;
@@ -79,11 +82,18 @@ api.interceptors.response.use(
         refreshInFlight = null;
         original.headers = { ...original.headers, Authorization: `Bearer ${token}` };
         return api.request(original);
-      } catch {
+      } catch (refreshError) {
         refreshInFlight = null;
+        // Only a refresh the server actually refused ends the session. A
+        // network error or 5xx (say, the API restarting) keeps the tokens, so
+        // the next request can refresh normally instead of forcing a sign-in.
+        // Reject with the refresh failure itself: passing on the original 401
+        // made callers (session restore) read a transient outage as sign-out.
+        if (!isAuthRejection(refreshError)) return Promise.reject(refreshError);
         clearTokens();
         if (window.location.pathname !== '/login') {
-          window.location.assign('/login');
+          const next = encodeURIComponent(window.location.pathname + window.location.search);
+          window.location.assign(`/login?next=${next}`);
         }
         return Promise.reject(error);
       }
@@ -92,6 +102,12 @@ api.interceptors.response.use(
     return Promise.reject(error);
   },
 );
+
+/** True when the server definitively refused the credentials, as opposed to being unreachable. */
+export function isAuthRejection(error: unknown): boolean {
+  const status = axios.isAxiosError(error) ? error.response?.status : undefined;
+  return status === 400 || status === 401 || status === 403;
+}
 
 /** Extract a human-readable message from an API failure. */
 export function errorMessage(error: unknown, fallback = 'Something went wrong'): string {

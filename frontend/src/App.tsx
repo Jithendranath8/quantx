@@ -1,39 +1,59 @@
-import React from 'react';
-import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
+import React, { lazy } from 'react';
+import { BrowserRouter, Navigate, Route, Routes, useLocation } from 'react-router-dom';
 
 import { AuthProvider } from './contexts/AuthContext';
 import { useAuth } from './contexts/useAuth';
-import DashboardLayout from './components/DashboardLayout';
-import AgentPage from './pages/AgentPage';
-import AnalyticsPage from './pages/AnalyticsPage';
-import BacktestPage from './pages/BacktestPage';
-import DashboardPage from './pages/DashboardPage';
-import ExperimentsPage from './pages/ExperimentsPage';
-import IndicatorsPage from './pages/IndicatorsPage';
-import LiveTradingPage from './pages/LiveTradingPage';
+import AppShell from './components/shell/AppShell';
+import { LogoMark } from './components/brand/Logo';
+import { ALL_PAGES, APP_BASE } from './lib/navigation';
+import AuthCallbackPage from './pages/AuthCallbackPage';
+import HomePage from './pages/HomePage';
 import LoginPage from './pages/LoginPage';
-import LogsPage from './pages/LogsPage';
-import MarketDataPage from './pages/MarketDataPage';
-import MarketMakingPage from './pages/MarketMakingPage';
-import OrdersPage from './pages/OrdersPage';
-import PaperTradingPage from './pages/PaperTradingPage';
-import PositionsPage from './pages/PositionsPage';
-import RiskPage from './pages/RiskPage';
-import SettingsPage from './pages/SettingsPage';
-import StrategiesPage from './pages/StrategiesPage';
-import TradeJournalPage from './pages/TradeJournalPage';
+
+// App pages load on demand, so the public home and login pages stay light.
+const AgentPage = lazy(() => import('./pages/AgentPage'));
+const AnalyticsPage = lazy(() => import('./pages/AnalyticsPage'));
+const BacktestPage = lazy(() => import('./pages/BacktestPage'));
+const DashboardPage = lazy(() => import('./pages/DashboardPage'));
+const ExperimentsPage = lazy(() => import('./pages/ExperimentsPage'));
+const IndicatorsPage = lazy(() => import('./pages/IndicatorsPage'));
+const LiveTradingPage = lazy(() => import('./pages/LiveTradingPage'));
+const LogsPage = lazy(() => import('./pages/LogsPage'));
+const MarketDataPage = lazy(() => import('./pages/MarketDataPage'));
+const MarketMakingPage = lazy(() => import('./pages/MarketMakingPage'));
+const OrdersPage = lazy(() => import('./pages/OrdersPage'));
+const PaperTradingPage = lazy(() => import('./pages/PaperTradingPage'));
+const PositionsPage = lazy(() => import('./pages/PositionsPage'));
+const RiskPage = lazy(() => import('./pages/RiskPage'));
+const SettingsPage = lazy(() => import('./pages/SettingsPage'));
+const StrategiesPage = lazy(() => import('./pages/StrategiesPage'));
+const TradeJournalPage = lazy(() => import('./pages/TradeJournalPage'));
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { isAuthenticated, isLoading } = useAuth();
+  const location = useLocation();
 
   if (isLoading) {
     return (
-      <div className="min-h-screen bg-slate-950 flex items-center justify-center text-slate-400 font-mono text-sm">
-        Loading QuantX Engine…
+      <div className="min-h-screen flex flex-col items-center justify-center gap-4 text-zinc-500 text-sm">
+        <LogoMark className="w-10 h-10 animate-pulse" />
+        Loading QuantX…
       </div>
     );
   }
-  return isAuthenticated ? <>{children}</> : <Navigate to="/login" replace />;
+  return isAuthenticated ? (
+    <>{children}</>
+  ) : (
+    <Navigate to={`/login?next=${encodeURIComponent(location.pathname + location.search)}`} replace />
+  );
+}
+
+/** Pages moved under /app; old bookmarks land on the same page, not the home page. */
+function LegacyRedirect() {
+  const { pathname, search } = useLocation();
+  const first = pathname.replace(/^\//, '').split('/')[0];
+  const known = ALL_PAGES.some((p) => p.path && p.path === first);
+  return <Navigate to={known ? `${APP_BASE}${pathname}${search}` : '/'} replace />;
 }
 
 export default function App() {
@@ -41,8 +61,10 @@ export default function App() {
     <AuthProvider>
       <BrowserRouter>
         <Routes>
+          <Route path="/" element={<HomePage />} />
           <Route path="/login" element={<LoginPage />} />
-          <Route path="/" element={<ProtectedRoute><DashboardLayout /></ProtectedRoute>}>
+          <Route path="/auth/callback" element={<AuthCallbackPage />} />
+          <Route path={APP_BASE} element={<ProtectedRoute><AppShell /></ProtectedRoute>}>
             <Route index element={<DashboardPage />} />
             <Route path="market" element={<MarketDataPage />} />
             <Route path="positions" element={<PositionsPage />} />
@@ -61,7 +83,7 @@ export default function App() {
             <Route path="logs" element={<LogsPage />} />
             <Route path="settings" element={<SettingsPage />} />
           </Route>
-          <Route path="*" element={<Navigate to="/" replace />} />
+          <Route path="*" element={<LegacyRedirect />} />
         </Routes>
       </BrowserRouter>
     </AuthProvider>

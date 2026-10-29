@@ -60,7 +60,7 @@ export default function TradeJournalPage() {
       <PageHeader title="Trade Journal" description="Record setups, outcomes, and what you learned" />
 
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
-        <Card title="New Entry" icon={<Plus className="w-4 h-4 text-cyan-400" />}>
+        <Card title="New Entry" icon={<Plus className="w-4 h-4 text-brand-400" />}>
           <div className="p-5 space-y-3">
             <div className="grid grid-cols-2 gap-3">
               <Field label="Symbol">
@@ -100,7 +100,7 @@ export default function TradeJournalPage() {
           </div>
         </Card>
 
-        <Card title="Entries" icon={<BookOpen className="w-4 h-4 text-cyan-400" />} className="xl:col-span-2">
+        <Card title="Entries" icon={<BookOpen className="w-4 h-4 text-brand-400" />} className="xl:col-span-2">
           <AsyncSection
             state={entries}
             emptyWhen={(d) => d.length === 0}
@@ -110,7 +110,7 @@ export default function TradeJournalPage() {
             {(data) => (
               <TableWrap>
                 <table className="w-full">
-                  <thead className="bg-slate-900/60">
+                  <thead className="bg-zinc-900/60">
                     <tr>
                       <Th>Trade</Th>
                       <Th>Symbol</Th>
@@ -121,20 +121,20 @@ export default function TradeJournalPage() {
                       <Th>Created</Th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-slate-800/50">
+                  <tbody className="divide-y divide-zinc-800/50">
                     {data.map((e) => (
-                      <tr key={e.id} className="hover:bg-slate-800/30 transition-colors align-top">
-                        <Td mono className="text-cyan-400 text-xs">{e.trade_id}</Td>
+                      <tr key={e.id} className="hover:bg-zinc-800/30 transition-colors align-top">
+                        <Td mono className="text-brand-400 text-xs">{e.trade_id}</Td>
                         <Td mono className="text-white">{e.symbol}</Td>
                         <Td><Badge tone={e.direction === 'LONG' ? 'positive' : 'negative'}>{e.direction}</Badge></Td>
-                        <Td align="right" mono className="text-slate-300">{formatNumber(e.entry_price)}</Td>
-                        <Td align="right" mono className="text-slate-400">{e.risk_reward ? formatNumber(e.risk_reward) : '—'}</Td>
+                        <Td align="right" mono className="text-zinc-300">{formatNumber(e.entry_price)}</Td>
+                        <Td align="right" mono className="text-zinc-400">{e.risk_reward ? formatNumber(e.risk_reward) : '—'}</Td>
                         <Td
                           align="right"
                           mono
                           className={
                             e.realized_pnl === null
-                              ? 'text-slate-500'
+                              ? 'text-zinc-500'
                               : e.realized_pnl >= 0
                                 ? 'text-emerald-400'
                                 : 'text-red-400'
@@ -142,7 +142,7 @@ export default function TradeJournalPage() {
                         >
                           {formatUsd(e.realized_pnl)}
                         </Td>
-                        <Td className="text-slate-500 text-xs">{formatDateTime(e.created_at)}</Td>
+                        <Td className="text-zinc-500 text-xs">{formatDateTime(e.created_at)}</Td>
                       </tr>
                     ))}
                   </tbody>

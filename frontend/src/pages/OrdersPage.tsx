@@ -42,16 +42,18 @@ export default function OrdersPage() {
       <PageHeader title="Orders" description="Paper order history for the selected account" />
 
       {accounts.data && accounts.data.length > 0 && (
-        <Field label="Account">
-          <Select value={selectedId ?? ''} onChange={(e) => setSelectedId(e.target.value)}>
-            {accounts.data.map((a) => (
-              <option key={a.id} value={a.id}>{a.name}</option>
-            ))}
-          </Select>
-        </Field>
+        <div className="w-full max-w-sm">
+          <Field label="Account">
+            <Select value={selectedId ?? ''} onChange={(e) => setSelectedId(e.target.value)}>
+              {accounts.data.map((a) => (
+                <option key={a.id} value={a.id}>{a.name}</option>
+              ))}
+            </Select>
+          </Field>
+        </div>
       )}
 
-      <Card title="Order History" icon={<ListOrdered className="w-4 h-4 text-cyan-400" />}>
+      <Card title="Order History" icon={<ListOrdered className="w-4 h-4 text-brand-400" />}>
         {accounts.data && accounts.data.length === 0 ? (
           <EmptyState
             message="No paper trading accounts"
@@ -66,7 +68,7 @@ export default function OrdersPage() {
             {(data) => (
               <TableWrap>
                 <table className="w-full">
-                  <thead className="bg-slate-900/60">
+                  <thead className="bg-zinc-900/60">
                     <tr>
                       <Th>Symbol</Th>
                       <Th>Side</Th>
@@ -77,14 +79,14 @@ export default function OrdersPage() {
                       <Th>Status</Th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-slate-800/50">
+                  <tbody className="divide-y divide-zinc-800/50">
                     {data.map((o) => (
-                      <tr key={o.id} className="hover:bg-slate-800/30 transition-colors">
+                      <tr key={o.id} className="hover:bg-zinc-800/30 transition-colors">
                         <Td mono className="text-white font-semibold">{o.symbol}</Td>
                         <Td><Badge tone={o.side === 'BUY' ? 'positive' : 'negative'}>{o.side}</Badge></Td>
-                        <Td className="text-slate-400">{o.order_type}</Td>
-                        <Td align="right" mono className="text-slate-300">{formatNumber(o.quantity, 6)}</Td>
-                        <Td align="right" mono className="text-slate-300">{formatUsd(o.price)}</Td>
+                        <Td className="text-zinc-400">{o.order_type}</Td>
+                        <Td align="right" mono className="text-zinc-300">{formatNumber(o.quantity, 6)}</Td>
+                        <Td align="right" mono className="text-zinc-300">{formatUsd(o.price)}</Td>
                         <Td align="right" mono className="text-white">{formatUsd(o.filled_price)}</Td>
                         <Td><Badge tone={statusTone(o.status)}>{o.status}</Badge></Td>
                       </tr>

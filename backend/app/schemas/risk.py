@@ -15,7 +15,7 @@ class RiskConfig(BaseModel):
     max_leverage: int = Field(default=10, description="Max allowed leverage")
     max_portfolio_exposure_pct: float = Field(default=0.50, description="Max combined portfolio exposure (0.50 = 50%)")
     max_concurrent_trades: int = Field(default=5, description="Max concurrent open positions")
-    cooldown_period_minutes: int = Field(default=15, description="Cooldown duration after loss streak")
+    cooldown_period_minutes: int = Field(default=15, description="Minutes a symbol cannot be bought again after a losing exit in it")
     circuit_breaker_active: bool = Field(default=False, description="Manual or automatic circuit breaker state")
 
 
@@ -32,6 +32,9 @@ class TradeRiskRequest(BaseModel):
     current_daily_loss_usd: float = 0.0
     active_positions_count: int = 0
     current_exposure_usd: float = 0.0
+    # Minutes since the account last closed a losing trade in this symbol, or
+    # None when there is no such exit (or the caller cannot know).
+    minutes_since_loss_on_symbol: float | None = None
 
 
 class RiskCheckResult(BaseModel):

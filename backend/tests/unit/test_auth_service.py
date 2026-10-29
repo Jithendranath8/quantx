@@ -14,6 +14,7 @@ from app.core.exceptions import (
     InvalidCredentialsError,
     ValidationError,
 )
+from app.models.user import User
 from app.schemas.auth import UserRegisterRequest
 from app.services.auth_service import AuthService
 
@@ -221,3 +222,23 @@ class TestAuthServiceTokenRefresh:
         # Try to reuse the old token — should fail
         with pytest.raises(TokenInvalidError):
             await service.refresh_tokens(old_refresh)
+
+
+@pytest.mark.unit
+class TestOAuthAccountCreationRace:
+    @pytest.mark.asyncio
+    async def test_a_username_taken_mid_flight_is_retried_not_a_server_error(
+        self, db_session: AsyncSession, test_user: User, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Between the availability check and the insert another sign-in can
+        take the same username; the unique-constraint clash must be retried."""
+        service = AuthService(db_session)
+        names = iter([test_user.username, "fresh-name"])
+
+        async def racing_username(_email: str) -> str:
+            return next(names)
+
+        monkeypatch.setattr(service, "_available_username", racing_username)
+        user = await service.resolve_oauth_user("newcomer@example.com", "New Comer", "google")
+        assert user.username == "fresh-name"
+        assert user.oauth_provider == "google"

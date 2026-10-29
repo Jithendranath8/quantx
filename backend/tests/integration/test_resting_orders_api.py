@@ -5,6 +5,10 @@ QuantX — Integration Tests for resting paper orders over HTTP.
 import pytest
 from httpx import AsyncClient
 
+# These tests exercise fills and bookkeeping with large round lots; the risk
+# gate is covered separately in tests/unit/test_paper_risk_gate.py.
+pytestmark = pytest.mark.usefixtures("relaxed_risk_limits")
+
 
 @pytest.mark.integration
 class TestRestingOrderEndpoints:

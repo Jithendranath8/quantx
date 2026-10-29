@@ -51,6 +51,22 @@ class RiskManager:
                 circuit_breaker_triggered=True,
             )
 
+        # 2b. Cooldown after a losing exit in the same symbol: no revenge trades.
+        if (
+            request.minutes_since_loss_on_symbol is not None
+            and request.minutes_since_loss_on_symbol < self.config.cooldown_period_minutes
+        ):
+            remaining = self.config.cooldown_period_minutes - request.minutes_since_loss_on_symbol
+            return RiskCheckResult(
+                is_approved=False,
+                rejection_reason=(
+                    f"Cooldown: {request.symbol} closed at a loss {request.minutes_since_loss_on_symbol:.0f} min ago; "
+                    f"buying it again is blocked for another {remaining:.0f} min."
+                ),
+                max_allowed_position_size_usd=0.0,
+                recommended_position_size_usd=0.0,
+            )
+
         # 3. Max Leverage Check
         if request.leverage > self.config.max_leverage:
             return RiskCheckResult(
@@ -105,3 +121,19 @@ class RiskManager:
             max_allowed_position_size_usd=max_exposure_usd,
             recommended_position_size_usd=final_position_size,
         )
+
+
+def oversize_reason(request: TradeRiskRequest, result: RiskCheckResult) -> str | None:
+    """Why an approved order is still too large for the per-trade risk budget, if it is.
+
+    ``validate_trade`` approves an order and *recommends* a smaller size; an
+    executing caller must refuse the excess rather than silently fill it.
+    Half a cent of slack absorbs float rounding in the sizing arithmetic.
+    """
+    if not result.is_approved or request.order_amount_usd <= result.recommended_position_size_usd + 0.005:
+        return None
+    basis = "for this stop distance" if request.stop_loss_price else "without a stop loss"
+    return (
+        f"Order of ${request.order_amount_usd:,.2f} exceeds the risk-per-trade limit of "
+        f"${result.recommended_position_size_usd:,.2f} {basis}."
+    )

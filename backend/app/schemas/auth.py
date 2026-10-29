@@ -91,6 +91,8 @@ class UserResponse(BaseModel):
     is_active: bool
     is_superuser: bool
     bio: str | None = None
+    # Provider that can sign this account in, or None for password-only.
+    oauth_provider: str | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -116,3 +118,30 @@ class MessageResponse(BaseModel):
 
     message: str
     success: bool = True
+
+
+class OAuthProviderInfo(BaseModel):
+    """A sign-in provider the login page can offer."""
+
+    name: str
+    label: str
+
+
+class OAuthExchangeRequest(BaseModel):
+    """The one-time code handed to the SPA after a provider sign-in."""
+
+    code: str = Field(..., min_length=16, max_length=128)
+    # The random value the SPA generated when it started this sign-in.
+    client_nonce: str = Field(..., min_length=32, max_length=128)
+
+
+class OAuthLinkStartRequest(BaseModel):
+    """Nonce of the browser starting a provider link."""
+
+    client_nonce: str = Field(..., min_length=32, max_length=128)
+
+
+class OAuthLinkStartResponse(BaseModel):
+    """Where to send the browser to link a provider to the signed-in account."""
+
+    authorize_url: str

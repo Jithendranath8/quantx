@@ -6,6 +6,8 @@ export interface AuthContextType {
   user: User | null;
   login: (email: string, password: string) => Promise<void>;
   register: (email: string, username: string, password: string, fullName?: string) => Promise<void>;
+  /** Finish an OAuth 2.0 sign-in by redeeming the one-time callback code. */
+  completeOAuth: (code: string, clientNonce: string) => Promise<void>;
   logout: () => Promise<void>;
   isAuthenticated: boolean;
   isLoading: boolean;

@@ -5,8 +5,9 @@ Stores virtual trading accounts, orders, positions, and execution fills.
 """
 
 import uuid
+from datetime import datetime
 
-from sqlalchemy import Float, String
+from sqlalchemy import DateTime, Float, String
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -59,6 +60,10 @@ class PaperOrder(Base):
     status: Mapped[str] = mapped_column(String(30), nullable=False, default="PENDING")  # PENDING, FILLED, CANCELLED, REJECTED, CANCELLED_BY_KILL_SWITCH
     stop_loss: Mapped[float | None] = mapped_column(Float, nullable=True)
     take_profit: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # Set when the order fills. realized_pnl is recorded on SELL fills only and
+    # is what the daily-loss limit sums over the current UTC day.
+    filled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    realized_pnl: Mapped[float | None] = mapped_column(Float, nullable=True)
 
 
 class PaperPosition(Base):

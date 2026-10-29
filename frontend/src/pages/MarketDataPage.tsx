@@ -217,7 +217,7 @@ export default function MarketDataPage() {
         />
       </div>
 
-      <Card title={`Microstructure · ${symbol}`} icon={<Activity className="w-4 h-4 text-cyan-400" />}>
+      <Card title={`Microstructure · ${symbol}`} icon={<Activity className="w-4 h-4 text-brand-400" />}>
         {microData ? (
           <div className="p-5 space-y-4">
             <div className="flex justify-end">
@@ -241,12 +241,12 @@ export default function MarketDataPage() {
               />
             </div>
             <div>
-              <div className="flex justify-between text-xs text-slate-500 mb-1">
+              <div className="flex justify-between text-xs text-zinc-500 mb-1">
                 <span className="text-emerald-400">bids</span>
                 <span>order-book imbalance</span>
                 <span className="text-red-400">asks</span>
               </div>
-              <div className="flex h-2.5 rounded-full overflow-hidden bg-slate-800">
+              <div className="flex h-2.5 rounded-full overflow-hidden bg-zinc-800">
                 <div
                   className="bg-emerald-500/70 transition-all duration-150"
                   style={{ width: `${((1 + microData.imbalance) / 2) * 100}%` }}
@@ -259,7 +259,7 @@ export default function MarketDataPage() {
             </div>
           </div>
         ) : (
-          <div className="p-5 text-sm text-slate-500">{micro.error ?? 'Loading microstructure…'}</div>
+          <div className="p-5 text-sm text-zinc-500">{micro.error ?? 'Loading microstructure…'}</div>
         )}
       </Card>
 
@@ -271,7 +271,7 @@ export default function MarketDataPage() {
                 key={tf}
                 onClick={() => setTimeframe(tf)}
                 className={`rounded px-2.5 py-1 text-xs font-medium transition-colors ${
-                  tf === timeframe ? 'bg-cyan-500/15 text-cyan-300' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
+                  tf === timeframe ? 'bg-brand-500/15 text-brand-300' : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/60'
                 }`}
               >
                 {tf}
@@ -301,23 +301,23 @@ export default function MarketDataPage() {
             {(data) => (
               <div className="p-5 space-y-4">
                 <div>
-                  <div className="text-xs font-medium text-slate-500 uppercase tracking-wider mb-2">Asks</div>
+                  <div className="text-xs font-medium text-zinc-500 uppercase tracking-wider mb-2">Asks</div>
                   <div className="space-y-1">
                     {[...data.asks].reverse().map(([price, qty], i) => (
                       <div key={`ask-${i}`} className="flex justify-between text-xs font-mono">
                         <span className="text-red-400">{formatNumber(Number(price))}</span>
-                        <span className="text-slate-500">{formatNumber(Number(qty), 4)}</span>
+                        <span className="text-zinc-500">{formatNumber(Number(qty), 4)}</span>
                       </div>
                     ))}
                   </div>
                 </div>
                 <div>
-                  <div className="text-xs font-medium text-slate-500 uppercase tracking-wider mb-2">Bids</div>
+                  <div className="text-xs font-medium text-zinc-500 uppercase tracking-wider mb-2">Bids</div>
                   <div className="space-y-1">
                     {data.bids.map(([price, qty], i) => (
                       <div key={`bid-${i}`} className="flex justify-between text-xs font-mono">
                         <span className="text-emerald-400">{formatNumber(Number(price))}</span>
-                        <span className="text-slate-500">{formatNumber(Number(qty), 4)}</span>
+                        <span className="text-zinc-500">{formatNumber(Number(qty), 4)}</span>
                       </div>
                     ))}
                   </div>
@@ -328,38 +328,38 @@ export default function MarketDataPage() {
         </Card>
       </div>
 
-      <Card title={`Liquidity · ${symbol}`} icon={<Activity className="w-4 h-4 text-cyan-400" />}>
+      <Card title={`Liquidity · ${symbol}`} icon={<Activity className="w-4 h-4 text-brand-400" />}>
         <div className="p-5">
           {depthBook ? (
             <>
               <DepthChart bids={depthBook.bids} asks={depthBook.asks} />
-              <div className="flex justify-between text-xs font-mono text-slate-500 mt-2">
+              <div className="flex justify-between text-xs font-mono text-zinc-500 mt-2">
                 <span className="text-emerald-400">cumulative bids</span>
                 <span>{liveBook ? 'live · depth stream' : 'snapshot'}</span>
                 <span className="text-red-400">cumulative asks</span>
               </div>
             </>
           ) : (
-            <div className="text-sm text-slate-500">Loading depth…</div>
+            <div className="text-sm text-zinc-500">Loading depth…</div>
           )}
         </div>
       </Card>
 
       {symbols.error && (
-        <div className="text-xs text-amber-400">
+        <div className="text-xs text-yellow-400">
           <Badge tone="warning">Symbols unavailable</Badge> {symbols.error}
         </div>
       )}
 
       {pairCoverage && pairCoverage.has_data && pairCoverage.is_stale && (
-        <p className="text-xs text-amber-400">
+        <p className="text-xs text-yellow-400">
           <Badge tone="warning">stale</Badge> Newest {symbol} {timeframe} candle is from{' '}
           {formatDateTime(pairCoverage.newest)}. The sync job tops this up every 10 minutes.
         </p>
       )}
 
       {coverage.data && coverage.data.pairs_missing > 0 && (
-        <p className="text-xs text-slate-500">
+        <p className="text-xs text-zinc-500">
           {coverage.data.pairs_missing} of {coverage.data.pairs_total} symbol/timeframe pairs have
           no data yet. A background job is filling them; use Sync market data to start it now.
         </p>
@@ -368,7 +368,7 @@ export default function MarketDataPage() {
       {sync.error && <p className="text-xs text-red-400">{sync.error}</p>}
 
       {!streamEnabled && (
-        <p className="text-xs text-slate-600">
+        <p className="text-xs text-zinc-600">
           Live streaming is off. Set <span className="font-mono">MARKET_STREAM_ENABLED=true</span> on
           the backend to push ticks over the WebSocket gateway instead of polling.
         </p>

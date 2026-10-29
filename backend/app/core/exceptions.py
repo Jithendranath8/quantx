@@ -27,6 +27,19 @@ class AuthenticationError(QuantXError):
         super().__init__(message, details)
 
 
+class OAuthSignInError(AuthenticationError):
+    """An OAuth sign-in failure with a stable code.
+
+    The callback redirects the browser with ``code`` only. The login page maps
+    known codes to its own wording, so a crafted callback link cannot make the
+    QuantX page display arbitrary text.
+    """
+
+    def __init__(self, code: str, message: str) -> None:
+        self.code = code
+        super().__init__(message, {"code": code})
+
+
 class InvalidCredentialsError(AuthenticationError):
     """Raised when login credentials are incorrect."""
 

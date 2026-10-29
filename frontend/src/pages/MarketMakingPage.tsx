@@ -71,7 +71,7 @@ function QuoteBand({ series }: { series: QuotePoint[] }) {
   const bidsRev = series.map((p, i) => `${(i * step).toFixed(3)},${y(p.bid)}`).reverse();
   return (
     <svg viewBox="0 0 100 40" preserveAspectRatio="none" className="w-full h-40" role="img" aria-label="Quotes around mid price">
-      <polygon points={[...asks, ...bidsRev].join(' ')} fill="#06b6d4" opacity="0.12" />
+      <polygon points={[...asks, ...bidsRev].join(' ')} fill="#ff7a1a" opacity="0.12" />
       <path d={linePath(series.map((p) => p.mid), min, max)} fill="none" stroke="#e2e8f0" strokeWidth="0.5" vectorEffect="non-scaling-stroke" />
     </svg>
   );
@@ -108,7 +108,7 @@ export default function MarketMakingPage() {
         description="Avellaneda–Stoikov inventory-aware quoting, simulated over stored candles"
       />
 
-      <Card title="Configuration" icon={<Layers className="w-4 h-4 text-cyan-400" />}>
+      <Card title="Configuration" icon={<Layers className="w-4 h-4 text-brand-400" />}>
         <div className="p-5 flex flex-wrap items-end gap-4">
           <Field label="Symbol">
             <TextInput value={symbol} onChange={(e) => setSymbol(e.target.value.toUpperCase())} />
@@ -142,7 +142,7 @@ export default function MarketMakingPage() {
       {result && m && (
         <>
           {result.series.length === 0 && (
-            <div className="text-xs text-amber-400">
+            <div className="text-xs text-yellow-400">
               <Badge tone="warning">No data</Badge> No candles are stored for {result.symbol} {result.timeframe}.
             </div>
           )}
@@ -174,7 +174,7 @@ export default function MarketMakingPage() {
           <Card title="Quotes vs Mid Price">
             <div className="p-5">
               <QuoteBand series={result.series} />
-              <p className="text-xs text-slate-500 mt-2">
+              <p className="text-xs text-zinc-500 mt-2">
                 The shaded band is the maker's live bid/ask; it skews away from the mid as inventory builds.
               </p>
             </div>
@@ -183,8 +183,8 @@ export default function MarketMakingPage() {
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             <Card title="Cumulative P&L">
               <div className="p-5">
-                <Sparkline values={result.series.map((p) => p.pnl)} color="#06b6d4" label="Cumulative PnL" />
-                <div className="flex justify-between text-xs font-mono text-slate-500 mt-2">
+                <Sparkline values={result.series.map((p) => p.pnl)} color="#ff7a1a" label="Cumulative PnL" />
+                <div className="flex justify-between text-xs font-mono text-zinc-500 mt-2">
                   <span>$0</span>
                   <span className={m.total_pnl >= 0 ? 'text-emerald-400' : 'text-red-400'}>{formatUsd(m.total_pnl)}</span>
                 </div>
@@ -193,7 +193,7 @@ export default function MarketMakingPage() {
             <Card title="Inventory">
               <div className="p-5">
                 <InventoryChart series={result.series} />
-                <div className="flex justify-between text-xs font-mono text-slate-500 mt-2">
+                <div className="flex justify-between text-xs font-mono text-zinc-500 mt-2">
                   <span>cap ±{result.params.max_inventory}</span>
                   <span>final {formatNumber(m.final_inventory)}</span>
                 </div>
@@ -203,11 +203,11 @@ export default function MarketMakingPage() {
 
           <Card title={`Recent Fills (${result.fills.length})`}>
             {result.fills.length === 0 ? (
-              <div className="p-5 text-sm text-slate-500">No quotes were filled on this data.</div>
+              <div className="p-5 text-sm text-zinc-500">No quotes were filled on this data.</div>
             ) : (
               <TableWrap>
                 <table className="w-full">
-                  <thead className="bg-slate-900/60">
+                  <thead className="bg-zinc-900/60">
                     <tr>
                       <Th>Time</Th>
                       <Th>Side</Th>
@@ -216,13 +216,13 @@ export default function MarketMakingPage() {
                       <Th align="right">Edge vs mid</Th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-slate-800/50">
+                  <tbody className="divide-y divide-zinc-800/50">
                     {result.fills.slice(-50).reverse().map((f, i) => (
-                      <tr key={i} className="hover:bg-slate-800/30 transition-colors">
-                        <Td className="text-slate-400 text-xs">{f.timestamp}</Td>
+                      <tr key={i} className="hover:bg-zinc-800/30 transition-colors">
+                        <Td className="text-zinc-400 text-xs">{f.timestamp}</Td>
                         <Td><Badge tone={f.side === 'BUY' ? 'positive' : 'negative'}>{f.side}</Badge></Td>
-                        <Td align="right" mono className="text-slate-300">{formatNumber(f.price)}</Td>
-                        <Td align="right" mono className="text-slate-400">{formatNumber(f.size)}</Td>
+                        <Td align="right" mono className="text-zinc-300">{formatNumber(f.price)}</Td>
+                        <Td align="right" mono className="text-zinc-400">{formatNumber(f.size)}</Td>
                         <Td align="right" mono className="text-emerald-400">{formatUsd(f.edge)}</Td>
                       </tr>
                     ))}

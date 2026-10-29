@@ -78,11 +78,11 @@ export default function AnalyticsPage() {
 
             <Card title="Allocation Breakdown">
               {data.allocations.length === 0 ? (
-                <div className="p-5 text-sm text-slate-500">No allocations to show.</div>
+                <div className="p-5 text-sm text-zinc-500">No allocations to show.</div>
               ) : (
                 <TableWrap>
                   <table className="w-full">
-                    <thead className="bg-slate-900/60">
+                    <thead className="bg-zinc-900/60">
                       <tr>
                         <Th>Asset</Th>
                         <Th align="right">Value</Th>
@@ -90,16 +90,16 @@ export default function AnalyticsPage() {
                         <Th>Distribution</Th>
                       </tr>
                     </thead>
-                    <tbody className="divide-y divide-slate-800/50">
+                    <tbody className="divide-y divide-zinc-800/50">
                       {data.allocations.map((a) => (
-                        <tr key={a.symbol} className="hover:bg-slate-800/30 transition-colors">
+                        <tr key={a.symbol} className="hover:bg-zinc-800/30 transition-colors">
                           <Td mono className="text-white">{a.symbol}</Td>
-                          <Td align="right" mono className="text-slate-300">{formatUsd(a.value_usd)}</Td>
-                          <Td align="right" mono className="text-slate-400">{formatPercent(a.allocation_pct)}</Td>
+                          <Td align="right" mono className="text-zinc-300">{formatUsd(a.value_usd)}</Td>
+                          <Td align="right" mono className="text-zinc-400">{formatPercent(a.allocation_pct)}</Td>
                           <Td className="w-1/3">
-                            <div className="w-full bg-slate-800 rounded-full h-1.5">
+                            <div className="w-full bg-zinc-800 rounded-full h-1.5">
                               <div
-                                className="h-1.5 rounded-full bg-gradient-to-r from-cyan-500 to-blue-500"
+                                className="h-1.5 rounded-full bg-gradient-to-r from-brand-500 to-brand-500"
                                 style={{ width: `${Math.min(100, Math.max(0, a.allocation_pct))}%` }}
                               />
                             </div>
