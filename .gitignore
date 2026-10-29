@@ -101,6 +101,5 @@ logs/
 monitoring/prometheus/metrics_password
 
 ## Editor/assistant tooling
-# Ignore local .claude config (e.g. launch.json) but SHARE the project's Agent Skills.
-.claude/*
-!.claude/skills/
+# Claude Code config and skills are local to each developer.
+.claude/
