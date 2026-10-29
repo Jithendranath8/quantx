@@ -49,18 +49,20 @@ export default function PositionsPage() {
       />
 
       {accounts.data && accounts.data.length > 0 && (
-        <Field label="Account">
-          <Select value={selectedId ?? ''} onChange={(e) => setSelectedId(e.target.value)}>
-            {accounts.data.map((a) => (
-              <option key={a.id} value={a.id}>{a.name} · {formatUsd(a.current_balance)}</option>
-            ))}
-          </Select>
-        </Field>
+        <div className="w-full max-w-sm">
+          <Field label="Account">
+            <Select value={selectedId ?? ''} onChange={(e) => setSelectedId(e.target.value)}>
+              {accounts.data.map((a) => (
+                <option key={a.id} value={a.id}>{a.name} · {formatUsd(a.current_balance)}</option>
+              ))}
+            </Select>
+          </Field>
+        </div>
       )}
 
       {mark.error && <div className="text-xs text-red-400">{mark.error}</div>}
 
-      <Card title="Open Positions" icon={<Layers className="w-4 h-4 text-cyan-400" />}>
+      <Card title="Open Positions" icon={<Layers className="w-4 h-4 text-brand-400" />}>
         {accounts.data && accounts.data.length === 0 ? (
           <EmptyState
             message="No paper trading accounts"
@@ -76,7 +78,7 @@ export default function PositionsPage() {
             {(data) => (
               <TableWrap>
                 <table className="w-full">
-                  <thead className="bg-slate-900/60">
+                  <thead className="bg-zinc-900/60">
                     <tr>
                       <Th>Symbol</Th>
                       <Th>Side</Th>
@@ -87,13 +89,13 @@ export default function PositionsPage() {
                       <Th align="right">Stop / Target</Th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-slate-800/50">
+                  <tbody className="divide-y divide-zinc-800/50">
                     {data.map((p) => (
-                      <tr key={p.id} className="hover:bg-slate-800/30 transition-colors">
+                      <tr key={p.id} className="hover:bg-zinc-800/30 transition-colors">
                         <Td mono className="text-white font-semibold">{p.symbol}</Td>
                         <Td><Badge tone={p.side === 'LONG' ? 'positive' : 'negative'}>{p.side}</Badge></Td>
-                        <Td align="right" mono className="text-slate-300">{formatNumber(p.quantity, 6)}</Td>
-                        <Td align="right" mono className="text-slate-300">{formatUsd(p.entry_price)}</Td>
+                        <Td align="right" mono className="text-zinc-300">{formatNumber(p.quantity, 6)}</Td>
+                        <Td align="right" mono className="text-zinc-300">{formatUsd(p.entry_price)}</Td>
                         <Td align="right" mono className="text-white">{formatUsd(p.current_price)}</Td>
                         <Td
                           align="right"
@@ -102,7 +104,7 @@ export default function PositionsPage() {
                         >
                           {formatUsd(p.unrealized_pnl)}
                         </Td>
-                        <Td align="right" mono className="text-slate-500 text-xs">
+                        <Td align="right" mono className="text-zinc-500 text-xs">
                           {p.stop_loss ? formatNumber(p.stop_loss) : '—'} / {p.take_profit ? formatNumber(p.take_profit) : '—'}
                         </Td>
                       </tr>
