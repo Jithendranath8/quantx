@@ -106,10 +106,10 @@ class TestAIServiceHealth:
         assert ai["healthy"] is False
 
     @pytest.mark.asyncio
-    async def test_all_wait_decisions_report_degraded(
+    async def test_all_failed_calls_report_degraded(
         self, client: AsyncClient, auth_headers: dict, db_session, stub_binance, monkeypatch
     ) -> None:
-        """An all-WAIT window is the signature of a failing provider call."""
+        """A window where every call fell back to WAIT means the provider is failing."""
         from datetime import UTC, datetime
 
         from app.core.config import get_settings
@@ -128,7 +128,10 @@ class TestAIServiceHealth:
                     token_usage={},
                     estimated_cost_usd=0.0,
                     input_snapshot={},
-                    output_decision={"action": "WAIT", "reasoning": "AI Agent error"},
+                    output_decision={
+                        "action": "WAIT",
+                        "reasoning": "Default to WAIT. Reason: AI Agent error: 429 quota exceeded",
+                    },
                     timestamp=datetime.now(UTC),
                 )
             )
@@ -138,8 +141,44 @@ class TestAIServiceHealth:
         ai = response.json()["subsystems"]["ai_service"]
         assert ai["status"] == "DEGRADED"
         assert ai["healthy"] is False
-        assert ai["recent_wait_decisions"] == 3
+        assert ai["recent_failed_calls"] == 3
         assert "quota" in ai["detail"]
+
+    @pytest.mark.asyncio
+    async def test_reasoned_waits_report_operational(
+        self, client: AsyncClient, auth_headers: dict, db_session, stub_binance, monkeypatch
+    ) -> None:
+        """A model that answers but chooses to wait is a working provider, not a failing one."""
+        from datetime import UTC, datetime
+
+        from app.core.config import get_settings
+        from app.models.master_models import AIDecisionLog
+
+        monkeypatch.setattr(get_settings(), "openai_api_key", "sk-test-key")
+
+        for _ in range(3):
+            db_session.add(
+                AIDecisionLog(
+                    symbol="BTCUSDT",
+                    model="gpt-4o",
+                    confidence=0.4,
+                    action="WAIT",
+                    latency_ms=600,
+                    token_usage={"total_tokens": 450},
+                    estimated_cost_usd=0.001,
+                    input_snapshot={},
+                    output_decision={"action": "WAIT", "reasoning": "Mixed signals across timeframes; no edge."},
+                    timestamp=datetime.now(UTC),
+                )
+            )
+        await db_session.commit()
+
+        response = await client.get("/api/v1/health/system", headers=auth_headers)
+        ai = response.json()["subsystems"]["ai_service"]
+        assert ai["status"] == "OPERATIONAL"
+        assert ai["healthy"] is True
+        assert ai["recent_wait_decisions"] == 3
+        assert ai["recent_failed_calls"] == 0
 
     @pytest.mark.asyncio
     async def test_a_real_decision_reports_operational(

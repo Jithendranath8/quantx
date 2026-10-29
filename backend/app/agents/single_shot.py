@@ -33,6 +33,11 @@ logger = get_logger(__name__)
 # than a partial answer.
 MAX_DECISION_TOKENS = 1200
 
+# Reasoning prefix of the safe WAIT returned when the call itself failed. The
+# health check uses it to tell a failed provider call apart from a model that
+# genuinely chose to wait.
+FALLBACK_REASONING_PREFIX = "Default to WAIT. Reason:"
+
 
 class AgentAnalysis(BaseModel):
     """A decision plus the operational metadata of the call that produced it."""
@@ -113,7 +118,7 @@ class SingleShotAnalyst:
             decision=AgentDecision(
                 action="WAIT",
                 confidence=0.0,
-                reasoning=f"Default to WAIT. Reason: {reason}",
+                reasoning=f"{FALLBACK_REASONING_PREFIX} {reason}",
             ),
             model=self._model,
             latency_ms=int((time.perf_counter() - started) * 1000),

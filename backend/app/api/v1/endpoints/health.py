@@ -19,6 +19,7 @@ from fastapi import APIRouter
 from sqlalchemy import case, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.agents.single_shot import FALLBACK_REASONING_PREFIX
 from app.connectors.binance_client import get_binance_client
 from app.core.celery_app import celery_app
 from app.core.config import get_settings
@@ -228,25 +229,35 @@ async def system_health_center(user: CurrentUser, db: DBSession) -> dict[str, An
 async def _ai_service_status(db: AsyncSession, settings: Any) -> dict[str, Any]:
     """Report AI availability from configuration plus recent call outcomes."""
     # A self-hosted endpoint needs no key, so key presence is not the test.
-    if not settings.ai_provider_configured:
+    if not settings.agent_runtime_configured:
         return {
             "status": "NOT_CONFIGURED",
             "healthy": False,
             "model": settings.openai_model,
             "detail": (
-                "No AI provider set. Provide OPENAI_API_KEY, or OPENAI_BASE_URL "
-                "for a local or alternative OpenAI-compatible endpoint."
+                "No AI provider set. Provide ANTHROPIC_API_KEY, OPENAI_API_KEY, or "
+                "OPENAI_BASE_URL for a local or alternative OpenAI-compatible endpoint."
             ),
         }
 
+    provider = settings.resolved_llm_provider
+    if provider == "anthropic":
+        identity = {"provider": provider, "model": settings.anthropic_model, "endpoint": "https://api.anthropic.com"}
+    else:
+        identity = {
+            "provider": provider,
+            "model": settings.openai_model,
+            "endpoint": settings.openai_base_url or "https://api.openai.com/v1",
+        }
+
     since = datetime.now(UTC) - timedelta(hours=AI_HEALTH_WINDOW_HOURS)
+    reasoning = AIDecisionLog.output_decision["reasoning"].astext
     rows = (
         await db.execute(
             select(
                 func.count().label("total"),
-                func.sum(
-                    case((AIDecisionLog.output_decision["action"].astext == "WAIT", 1), else_=0)
-                ).label("waits"),
+                func.sum(case((AIDecisionLog.action == "WAIT", 1), else_=0)).label("waits"),
+                func.sum(case((reasoning.startswith(FALLBACK_REASONING_PREFIX), 1), else_=0)).label("failures"),
             ).where(AIDecisionLog.timestamp >= since)
         )
     ).one()
@@ -256,26 +267,25 @@ async def _ai_service_status(db: AsyncSession, settings: Any) -> dict[str, Any]:
         return {
             "status": "CONFIGURED",
             "healthy": True,
-            "model": settings.openai_model,
-            "endpoint": settings.openai_base_url or "https://api.openai.com/v1",
+            **identity,
             "detail": "Provider configured; no decisions yet in the health window.",
         }
 
-    # The agent degrades to WAIT on any provider error, so an all-WAIT window
-    # is the signature of a key that is present but not usable.
-    waits = int(rows.waits or 0)
-    failing = waits == total
+    # A WAIT the model reasoned its way to is a working provider being cautious.
+    # Only the analyst's fallback WAIT means the call itself failed, so the
+    # service is degraded only when every recent call ended in that fallback.
+    failures = int(rows.failures or 0)
+    failing = failures == total
     return {
         "status": "DEGRADED" if failing else "OPERATIONAL",
         "healthy": not failing,
-        "model": settings.openai_model,
-        "endpoint": settings.openai_base_url or "https://api.openai.com/v1",
+        **identity,
         "recent_decisions": total,
-        "recent_wait_decisions": waits,
+        "recent_wait_decisions": int(rows.waits or 0),
+        "recent_failed_calls": failures,
         "detail": (
-            "Every recent decision was WAIT, which is what the agent returns "
-            "when the provider call fails. Check the provider's status, and the "
-            "key's quota if one is in use."
+            "Every recent provider call failed and fell back to WAIT. Check the "
+            "provider's status, and the key's quota if one is in use."
             if failing
             else None
         ),
