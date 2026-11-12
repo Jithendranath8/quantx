@@ -18,6 +18,42 @@ own services, plus an ML price-direction model and an MCP server.
    agent decision against backend arithmetic; `RiskManager` is pure and
    non-overridable. A model can propose; math and explicit flags decide.
 
+## Security rules (from the 2026-11-12 audit — keep every one)
+The audit found 14 vulnerabilities; all came from breaking one of these. Each
+has a regression test in `tests/integration/test_security_regressions.py` or a
+guard in `tests/unit/test_route_security_inventory.py`. A failing guard means a
+rule was broken: fix the code, not the test.
+
+4. **Every route needs a signed-in user**, unless it is on the explicit public
+   list in the route inventory test. Use `CurrentUser`; never trust a bare JWT.
+5. **Live trading needs `LiveTrader`** (`users.can_trade_live`). All users share
+   the operator's one exchange account and sign-up is open. Nothing in the API
+   may set that flag. Any exchange action must be scoped to the caller's own
+   orders by client order id, never by symbol.
+6. **The server decides risk inputs.** Never size or check an order with a
+   number the caller sent when the server can read it (price, balance,
+   exposure). Working orders count toward limits, not just fills.
+7. **Never retry an order submit.** Sent once; an unknown outcome is resolved
+   by client order id. A 4xx from the exchange is final (`BinanceRejectedError`).
+8. **Never hold a DB transaction across a network call** (exchange, LLM,
+   broker). Commit first. Ten held connections stall a whole worker.
+9. **Bound every input**: use `app/schemas/validators.py` (`Symbol`,
+   `Timeframe`, `Price`, `Quantity`) and `app/api/params.py`. No bare `str` or
+   unbounded `float` for anything a client sends.
+10. **Shared loops isolate each item** (savepoint + catch), and anything a user
+    can queue into shared state has a per-user cap.
+11. **Secrets never reach logs or model output.** Log `type(exc).__name__` for
+    failed outbound calls; escape user text at the sink (alerts, exports).
+12. **Sessions**: access tokens carry `sid`; ending a session ends its tokens.
+    Refresh tokens are consumed atomically. OAuth accounts are bound to
+    (provider, subject), not to an email.
+13. **Config fails closed.** No published default secret is ever accepted
+    without `ALLOW_INSECURE_DEV_DEFAULTS` in development.
+
+When adding a feature, ask who else can reach it, what it shares with other
+users, and what happens if the caller sends the worst input. Add an abuse-case
+test alongside the happy-path test.
+
 ## Agentic layer map (`backend/app/`)
 - `agents/tools/` — provider-neutral **tool layer**. Each tool wraps a service
   with a validated Pydantic arg model + uniform `ToolResult`. `ToolRegistry`
