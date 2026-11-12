@@ -56,7 +56,7 @@ dependencies = [
     "celery[redis]>=5.4.0",
 
     # Data Processing
-    "numpy>=2.2.0",
+    "numpy>=2.5.4",
     "pandas>=2.2.0",
 
     # Monitoring
