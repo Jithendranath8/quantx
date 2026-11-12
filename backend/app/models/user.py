@@ -8,7 +8,7 @@ and trading preferences. Uses UUID primary keys for security.
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, String, Text
+from sqlalchemy import Boolean, DateTime, ForeignKey, Index, String, Text, text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -85,6 +85,36 @@ class User(Base):
         nullable=True,
         default=None,
     )
+    # The provider's own stable id for the person (Google ``sub``, GitHub
+    # ``id``). An email address can change hands; this cannot. Provider sign-in
+    # is bound to (oauth_provider, oauth_subject), so a different identity that
+    # merely reports the same email does not open the account.
+    oauth_subject: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
+        default=None,
+    )
+    # Permission to place orders on the operator's exchange account. Never set
+    # by registration or by any API route: the operator grants it out of band
+    # (``python -m app.cli grant-live-trading``). Sign-up is open, so without
+    # this every registered account could trade the operator's funds.
+    can_trade_live: Mapped[bool] = mapped_column(
+        Boolean,
+        default=False,
+        server_default="false",
+        nullable=False,
+    )
+
+    __table_args__ = (
+        # A provider identity belongs to at most one account.
+        Index(
+            "uq_users_oauth_identity",
+            "oauth_provider",
+            "oauth_subject",
+            unique=True,
+            postgresql_where=text("oauth_subject IS NOT NULL"),
+        ),
+    )
 
 
 class RefreshToken(Base):
@@ -131,6 +161,17 @@ class RefreshToken(Base):
         Boolean,
         default=False,
         nullable=False,
+    )
+    # One id per sign-in, inherited by every token that sign-in is rotated
+    # into. Access tokens carry it as ``sid`` and are honoured only while the
+    # family still has a live refresh token, which is what makes logout,
+    # "sign out everywhere" and reuse detection take effect immediately
+    # instead of when the access token happens to expire.
+    family_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        index=True,
+        nullable=True,
+        default=None,
     )
 
 

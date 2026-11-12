@@ -79,6 +79,36 @@ exposes a secret-gated cron endpoint so no background worker is needed.
    > set `FORWARDED_ALLOW_IPS` to your edge's address range — **never `*`**,
    > which would let any caller spoof their IP and defeat the brute-force throttle.
 
+### 3b. Security settings — do these on every deploy
+
+These are not optional. Each one closes a finding from the 2026-11-12 security
+audit (`docs/SECURITY_AUDIT.md`).
+
+| Setting | Why |
+|---|---|
+| `APP_ENV=production` | Turns on the production checks. The app now also refuses the placeholder secrets in *every* environment, so a missing `APP_ENV` fails closed instead of starting on published keys. |
+| `SECRET_KEY`, `JWT_SECRET_KEY` | 48+ random characters each, and different from each other. |
+| `FORWARDED_ALLOW_IPS` | The address range your platform's proxy connects from. Without it every visitor shares one login rate limit. Never `*`. The app logs `insecure_production_setting` at startup while this is unset. |
+| `ALLOWED_ORIGINS` | Your real frontend origin only. It is also the allow-list for WebSocket connections. |
+| `METRICS_PASSWORD` | A separate password for `/metrics`, so `SECRET_KEY` is not copied into monitoring. |
+
+**After the first deploy with migration `010_security_hardening`:**
+
+1. **Grant live trading to yourself.** Nobody can place live orders until an
+   operator grants it. Registration cannot set it.
+   ```
+   python -m app.cli grant-live-trading you@example.com     # in the API container
+   python -m app.cli list-live-traders
+   ```
+   On a host without a shell, run the SQL directly:
+   `UPDATE users SET can_trade_live = true WHERE email = 'you@example.com';`
+2. **Leave `ALLOW_MAINNET_TRADING=false`** unless you intend real orders. With
+   mainnet on, every account you granted in step 1 trades real funds.
+3. **Existing sessions keep working.** Provider (Google/GitHub) accounts are
+   bound to that provider identity on their next sign-in.
+4. **Watch the startup log** for `insecure_production_setting` lines and fix
+   each one.
+
 ### 4. Frontend — Cloudflare Pages
 1. New Pages project from this repo. Build command `npm ci && npm run build`,
    output dir `frontend/dist`, root `frontend`.

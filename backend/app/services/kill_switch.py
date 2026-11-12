@@ -150,7 +150,13 @@ class KillSwitchService:
     # ── Internals ────────────────────────────────────────────────────
 
     async def _cancel_exchange_orders(self, user_id: uuid.UUID) -> tuple[int, int, list[str]]:
-        """Cancel and verify this user's open Binance orders.
+        """Cancel and verify this user's own open Binance orders.
+
+        Every user shares the operator's exchange account, so the account's
+        open-order list contains other users' orders and orders placed outside
+        QuantX. An exchange order is cancelled only when its client order id or
+        exchange id matches one of the caller's own non-terminal rows. Selecting
+        by symbol alone let one user's kill switch cancel everyone's orders.
 
         Returns:
             (cancelled_count, failed_count, error_messages)
@@ -159,24 +165,24 @@ class KillSwitchService:
         failed = 0
         errors: list[str] = []
 
-        # Only touch symbols this user actually has live orders for, so one
-        # user's kill switch cannot cancel another's orders on a shared key.
-        stmt = select(LiveOrder.symbol).where(
+        stmt = select(LiveOrder).where(
             LiveOrder.user_id == user_id,
+            LiveOrder.is_testnet == self._client.testnet,
             LiveOrder.status.notin_(list(_TERMINAL_STATUSES)),
-        ).distinct()
-        symbols = [row for row in (await self._session.execute(stmt)).scalars().all()]
-
-        if not symbols:
+        )
+        own_orders = list((await self._session.execute(stmt)).scalars().all())
+        if not own_orders:
             return 0, 0, []
 
-        for symbol in symbols:
+        own_by_client_id = {o.client_order_id: o for o in own_orders}
+        own_by_exchange_id = {o.exchange_order_id: o for o in own_orders if o.exchange_order_id}
+
+        for symbol in sorted({o.symbol for o in own_orders}):
             try:
                 open_orders = await self._client.get_open_orders(symbol=symbol)
             except Exception as exc:
                 failed += 1
-                message = f"Could not list open orders for {symbol}: {exc}"
-                errors.append(message)
+                errors.append(f"Could not list open orders for {symbol}: {exc}")
                 logger.error("kill_switch_list_orders_failed", symbol=symbol, error=str(exc))
                 continue
 
@@ -184,12 +190,19 @@ class KillSwitchService:
                 exchange_id = order.get("orderId")
                 if exchange_id is None:
                     continue
+                local = own_by_client_id.get(str(order.get("clientOrderId") or "")) or own_by_exchange_id.get(
+                    str(exchange_id)
+                )
+                if local is None:
+                    # Someone else's order on the shared account: not ours to cancel.
+                    continue
                 try:
                     await self._client.cancel_order(symbol=symbol, order_id=exchange_id)
                     confirmed = await self._verify_cancelled(symbol, exchange_id)
                     if confirmed:
                         cancelled += 1
-                        await self._mark_local_cancelled(user_id, str(exchange_id))
+                        local.exchange_order_id = str(exchange_id)
+                        local.status = "CANCELED"
                     else:
                         failed += 1
                         errors.append(f"Order {exchange_id} on {symbol} did not reach a terminal state")
@@ -218,17 +231,6 @@ class KillSwitchService:
                 error=str(exc),
             )
             return False
-
-    async def _mark_local_cancelled(self, user_id: uuid.UUID, exchange_order_id: str) -> None:
-        """Reflect an exchange cancellation on the local order record."""
-        await self._session.execute(
-            update(LiveOrder)
-            .where(
-                LiveOrder.user_id == user_id,
-                LiveOrder.exchange_order_id == exchange_order_id,
-            )
-            .values(status="CANCELED")
-        )
 
     async def _cancel_paper_orders(self, user_id: uuid.UUID) -> int:
         """Cancel pending paper orders belonging to this user only."""

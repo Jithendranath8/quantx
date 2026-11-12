@@ -42,6 +42,9 @@ const ERROR_MESSAGES: Record<string, string> = {
     'An account with this email already uses a password. Sign in with it, then link the provider in Settings.',
   account_disabled: 'This account is deactivated.',
   email_mismatch: 'That provider account’s email is not this account’s email.',
+  provider_mismatch: 'This account signs in with a different provider. Use the one you signed up with.',
+  identity_mismatch: 'This email belongs to an account created by a different sign-in identity.',
+  identity_in_use: 'That provider account is already linked to another user.',
   provider_unavailable: 'That sign-in provider is not available.',
 };
 

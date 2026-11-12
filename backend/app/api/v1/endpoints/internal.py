@@ -62,7 +62,8 @@ async def run_scheduled_job(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Scheduled-jobs endpoint is disabled (CRON_SECRET is not set).",
         )
-    if not hmac.compare_digest(x_cron_secret, settings.cron_secret):
+    # Compared as bytes: compare_digest raises on non-ASCII str input.
+    if not hmac.compare_digest(x_cron_secret.encode("utf-8"), settings.cron_secret.encode("utf-8")):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid cron secret.")
 
     job = _JOBS.get(job_name)

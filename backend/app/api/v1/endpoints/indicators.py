@@ -12,6 +12,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, Query
 
+from app.api.params import SymbolPath
 from app.core.dependencies import CurrentUser, DBSession, RateLimiter
 from app.engines.indicators.multi_timeframe import (
     SUPPORTED_TIMEFRAMES,
@@ -36,7 +37,7 @@ async def list_timeframes() -> dict[str, list[str]]:
     dependencies=[Depends(RateLimiter("indicators", max_requests=60))],
 )
 async def get_indicators(
-    symbol: str,
+    symbol: SymbolPath,
     user: CurrentUser,
     db: DBSession,
     timeframes: str = Query("1m,5m,15m,1h,4h", description="Comma-separated timeframes"),

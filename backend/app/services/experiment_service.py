@@ -132,10 +132,12 @@ class ExperimentRegistryService:
         ai_model: str | None = None,
         dataset_row_count: int | None = None,
         commit: bool = True,
+        user_id: uuid.UUID | None = None,
     ) -> ExperimentRecord:
         """Record a research experiment with full provenance."""
         experiment = ExperimentRecord(
             experiment_id=f"EXP-{uuid.uuid4().hex[:12].upper()}",
+            user_id=user_id,
             strategy_name=strategy_name,
             strategy_version=strategy_version,
             parameters=parameters,
@@ -169,12 +171,14 @@ class ExperimentRegistryService:
         fees: float,
         slippage: float,
         ai_model: str | None = None,
+        user_id: uuid.UUID | None = None,
     ) -> ExperimentRecord:
         """Fingerprint the dataset and register the experiment against it."""
         dataset_hash = await self.record_fingerprint(df, symbol, timeframe)
         timestamps = pd.to_datetime(df["timestamp"], utc=True) if not df.empty else None
 
         experiment = await self.register_experiment(
+            user_id=user_id,
             strategy_name=strategy_name,
             parameters=parameters,
             dataset_version=dataset_hash,
@@ -200,11 +204,20 @@ class ExperimentRegistryService:
         )
         return experiment
 
-    async def list_experiments(self, limit: int = 100, offset: int = 0) -> list[ExperimentRecord]:
-        """Fetch registered experiments, newest first, always bounded."""
+    async def list_experiments(
+        self, limit: int = 100, offset: int = 0, user_id: uuid.UUID | None = None
+    ) -> list[ExperimentRecord]:
+        """Fetch registered experiments, newest first, always bounded.
+
+        Args:
+            user_id: Return only this user's experiments. None returns every
+                experiment and is for operators.
+        """
+        stmt = select(ExperimentRecord)
+        if user_id is not None:
+            stmt = stmt.where(ExperimentRecord.user_id == user_id)
         stmt = (
-            select(ExperimentRecord)
-            .order_by(ExperimentRecord.created_at.desc())
+            stmt.order_by(ExperimentRecord.created_at.desc())
             .offset(max(0, offset))
             .limit(min(max(1, limit), 500))
         )

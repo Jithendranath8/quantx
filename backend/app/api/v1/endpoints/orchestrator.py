@@ -9,6 +9,8 @@ paper order is placed solely when the risk engine and the deterministic
 validator both allow the decision. Live trading is not reachable here.
 """
 
+import asyncio
+
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from app.agents.llm import build_provider
@@ -16,10 +18,13 @@ from app.agents.orchestration import build_orchestrator
 from app.agents.tools.base import ToolContext
 from app.connectors.binance_client import get_binance_client
 from app.core.config import get_settings
-from app.core.dependencies import CurrentUser, DBSession, RateLimiter
+from app.core.dependencies import ConcurrencyLimit, CurrentUser, DBSession, RateLimiter
 from app.schemas.agent import OrchestrationResponse
 
 router = APIRouter(prefix="/agent", tags=["AI Trading Agent"])
+
+# Shared by both agent routes: a run can outlast the per-minute rate window.
+agent_runs = ConcurrencyLimit("agent", get_settings().agent_max_concurrent_per_user)
 
 
 @router.post(
@@ -36,7 +41,7 @@ router = APIRouter(prefix="/agent", tags=["AI Trading Agent"])
 async def orchestrate_symbol(
     user: CurrentUser,
     db: DBSession,
-    symbol: str = Query("BTCUSDT", min_length=3, max_length=20),
+    symbol: str = Query("BTCUSDT", pattern=r"^[A-Za-z0-9]{3,20}$"),
     execute: bool = Query(False, description="Allow a paper order if the decision is actionable"),
 ) -> OrchestrationResponse:
     """Run the agentic pipeline and return the decision plus specialist reports."""
@@ -50,14 +55,28 @@ async def orchestrate_symbol(
             ),
         )
 
+    user_id = user.id
+    # Authentication has already used this session. End that transaction so the
+    # pooled connection is not held idle for the whole run: tools take it again
+    # only while they query, and the model is waited on without it.
+    await db.commit()
+
     ctx = ToolContext(
         session=db,
-        user_id=user.id,
+        user_id=user_id,
         client=get_binance_client(),
         allow_mutations=execute,
     )
     orchestrator = build_orchestrator(build_provider(), ctx)
-    state = await orchestrator.run(symbol)
+    async with agent_runs.slot(str(user_id)):
+        try:
+            async with asyncio.timeout(settings.agent_run_timeout_seconds):
+                state = await orchestrator.run(symbol.upper())
+        except TimeoutError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+                detail="The agent run exceeded its time limit and was stopped.",
+            ) from exc
 
     return OrchestrationResponse(
         symbol=state.symbol,

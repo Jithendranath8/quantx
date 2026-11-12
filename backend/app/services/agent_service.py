@@ -67,6 +67,11 @@ class AgentService:
         """
         symbol = symbol.upper()
         context = await self.build_context(symbol, user_id)
+        # Everything the model needs has been read. Release the pooled
+        # connection before waiting on it: a model call can take a minute or
+        # more, and a connection held idle for that long is one no other
+        # request can use.
+        await self._session.commit()
         analysis = await self._analyst.analyze(context)
 
         current_price = self._latest_close(context)

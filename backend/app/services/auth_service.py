@@ -12,6 +12,7 @@ import uuid
 
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+from starlette.concurrency import run_in_threadpool
 
 from app.core.config import get_settings
 from app.core.exceptions import (
@@ -100,7 +101,10 @@ class AuthService:
             raise ConflictError("User", "username", data.username)
 
         # Create user
-        hashed_pw = hash_password(data.password)
+        # bcrypt is deliberately slow (hundreds of ms of CPU). Run inline it
+        # stalls the event loop for every other request, and these routes are
+        # reachable without an account, so it goes to a worker thread.
+        hashed_pw = await run_in_threadpool(hash_password, data.password)
         user = await self._user_repo.create(
             email=data.email,
             username=data.username,
@@ -154,10 +158,10 @@ class AuthService:
             # code called hash_password() here, generating a brand-new bcrypt
             # hash (12 rounds, ~250ms of CPU) that nothing ever read -- making
             # an unauthenticated endpoint a CPU-exhaustion lever.
-            verify_password(password, _DUMMY_PASSWORD_HASH)
+            await run_in_threadpool(verify_password, password, _DUMMY_PASSWORD_HASH)
             raise InvalidCredentialsError()
 
-        if not verify_password(password, user.hashed_password):
+        if not await run_in_threadpool(verify_password, password, user.hashed_password):
             await self._audit_repo.log(
                 action="user.login_failed",
                 user_id=user.id,
@@ -196,9 +200,16 @@ class AuthService:
         email: str,
         full_name: str | None,
         provider: str,
+        subject: str,
         ip_address: str | None = None,
     ) -> User:
-        """Find or create the account for a provider-verified email.
+        """Find or create the account for a provider identity.
+
+        The account is identified by (provider, subject): the provider's own
+        stable id for the person. The verified email only decides which account
+        a first sign-in creates or claims. Matching on email alone meant any
+        identity reporting the same address, on either provider, opened the
+        account, and an address can change hands.
 
         Only accounts the provider flow created are reachable this way.
         Password registration does not verify email ownership, so an existing
@@ -208,18 +219,36 @@ class AuthService:
         account gets a random, never-disclosed password.
 
         Raises:
-            OAuthSignInError: If a password account already holds the email, or the account is disabled.
+            OAuthSignInError: If a password account already holds the email,
+                the account belongs to a different provider identity, or the
+                account is disabled.
         """
-        user = await self._user_repo.get_by_email(email)
         created = False
+        user = await self._user_repo.get_by_oauth_identity(provider, subject)
         if user is None:
-            user, created = await self._create_oauth_user(email, full_name, provider)
-        if user.oauth_provider is None:
-            raise OAuthSignInError(
-                "password_account_exists",
-                "An account with this email is already registered with a password. "
-                "Sign in with your email and password instead.",
-            )
+            user = await self._user_repo.get_by_email(email)
+            if user is None:
+                user, created = await self._create_oauth_user(email, full_name, provider, subject)
+            if user.oauth_provider is None:
+                raise OAuthSignInError(
+                    "password_account_exists",
+                    "An account with this email is already registered with a password. "
+                    "Sign in with your email and password instead.",
+                )
+            if user.oauth_provider != provider:
+                raise OAuthSignInError(
+                    "provider_mismatch",
+                    "This account signs in with a different provider. Use the one you signed up with.",
+                )
+            if user.oauth_subject is None:
+                # Created before subjects were recorded: bind it on this first
+                # sign-in so every later one is checked.
+                user.oauth_subject = subject
+            elif user.oauth_subject != subject:
+                raise OAuthSignInError(
+                    "identity_mismatch",
+                    "This email belongs to an account created by a different sign-in identity.",
+                )
         if not user.is_active:
             raise OAuthSignInError("account_disabled", "Account is deactivated")
 
@@ -235,7 +264,9 @@ class AuthService:
         logger.info("user_oauth_sign_in", user_id=str(user.id), provider=provider, created=created)
         return user
 
-    async def _create_oauth_user(self, email: str, full_name: str | None, provider: str) -> tuple[User, bool]:
+    async def _create_oauth_user(
+        self, email: str, full_name: str | None, provider: str, subject: str
+    ) -> tuple[User, bool]:
         """Create the provider account, tolerating a concurrent first sign-in.
 
         Two first sign-ins can race on the unique email or a generated
@@ -256,6 +287,7 @@ class AuthService:
                         full_name=full_name[:100] if full_name else None,
                     )
                     user.oauth_provider = provider
+                    user.oauth_subject = subject
                     await self._session.flush()
                 return user, True
             except IntegrityError:
@@ -264,7 +296,9 @@ class AuthService:
                     return existing, False
         raise ConflictError("User", "username", email.split("@")[0])
 
-    async def link_oauth(self, user_id: str, email: str, provider: str, ip_address: str | None = None) -> User:
+    async def link_oauth(
+        self, user_id: str, email: str, provider: str, subject: str, ip_address: str | None = None
+    ) -> User:
         """Attach a provider to an account its owner is signed in to.
 
         The link was started by an authenticated request, and the provider has
@@ -283,8 +317,14 @@ class AuthService:
             raise OAuthSignInError(
                 "email_mismatch", "The provider account's verified email is not this account's email."
             )
+        claimed = await self._user_repo.get_by_oauth_identity(provider, subject)
+        if claimed is not None and claimed.id != user.id:
+            raise OAuthSignInError("identity_in_use", "That provider account is already linked to another user.")
         if user.oauth_provider is None:
             user.oauth_provider = provider
+            user.oauth_subject = subject
+        elif user.oauth_provider == provider and user.oauth_subject is None:
+            user.oauth_subject = subject
         await self._audit_repo.log(
             action="user.oauth_linked",
             user_id=user.id,
@@ -342,11 +382,13 @@ class AuthService:
         except Exception as e:
             raise TokenInvalidError() from e
 
-        # Check if token exists and is not revoked
-        stored_token = await self._token_repo.find_by_token(refresh_token)
-        if stored_token is None:
+        # Redeem the token in one atomic step: it is checked and revoked by a
+        # single statement, so two overlapping requests cannot both succeed.
+        consumed = await self._token_repo.consume(refresh_token)
+        if consumed is None or str(consumed[0]) != user_id:
             logger.warning("refresh_token_reuse_detected", user_id=user_id)
-            # Potential token reuse — revoke all tokens for safety
+            # Unknown, already used or revoked: treat as theft and end every
+            # session. This also ends the access tokens of those sessions.
             await self._token_repo.revoke_all_for_user(uuid.UUID(user_id))
             await self._session.commit()
             raise TokenInvalidError("Refresh token has been revoked")
@@ -354,13 +396,11 @@ class AuthService:
         # Verify user still exists and is active
         user = await self._user_repo.get_by_id(user_id)
         if user is None or not user.is_active:
+            await self._session.commit()
             raise TokenInvalidError("User not found or deactivated")
 
-        # Revoke the old refresh token (rotation)
-        await self._token_repo.revoke(refresh_token)
-
-        # Generate new tokens
-        tokens = await self._create_tokens(user)
+        # The new pair continues the same sign-in.
+        tokens = await self._create_tokens(user, family_id=consumed[1])
 
         await self._audit_repo.log(
             action="user.token_refreshed",
@@ -375,19 +415,29 @@ class AuthService:
     async def logout(
         self,
         refresh_token: str,
-        user_id: str,
         ip_address: str | None = None,
     ) -> MessageResponse:
         """Logout by revoking the provided refresh token.
 
+        The refresh token authenticates its own revocation. Requiring a valid
+        access token as well meant sign-out failed once that token had expired,
+        leaving the session's refresh token redeemable while the client showed
+        the user as signed out.
+
         Args:
             refresh_token: The refresh token to revoke.
-            user_id: The authenticated user's ID.
             ip_address: Client IP for audit logging.
 
         Returns:
             Success message.
         """
+        try:
+            user_id = verify_refresh_token(refresh_token)
+        except Exception:
+            # Expired or malformed: there is nothing left to revoke, and the
+            # caller's intent (be signed out) is already satisfied.
+            return MessageResponse(message="Successfully logged out")
+
         await self._token_repo.revoke(refresh_token, user_id=user_id)
 
         await self._audit_repo.log(
@@ -448,7 +498,7 @@ class AuthService:
 
     # ── Private Helpers ──────────────────────────────────────────────
 
-    async def _create_tokens(self, user: User) -> TokenResponse:
+    async def _create_tokens(self, user: User, family_id: uuid.UUID | None = None) -> TokenResponse:
         """Generate access + refresh tokens and store refresh token hash.
 
         Args:
@@ -457,14 +507,17 @@ class AuthService:
         Returns:
             TokenResponse with both tokens.
         """
+        # A new sign-in starts a session; a rotation continues the one it came
+        # from. The access token names that session so it can be ended early.
+        session_id = family_id or uuid.uuid4()
         access_token = create_access_token(
             subject=str(user.id),
-            extra_claims={"email": user.email, "username": user.username},
+            extra_claims={"email": user.email, "username": user.username, "sid": str(session_id)},
         )
         refresh_token = create_refresh_token(subject=str(user.id))
 
         # Store refresh token hash in database
-        await self._token_repo.create(user.id, refresh_token)
+        await self._token_repo.create(user.id, refresh_token, family_id=session_id)
 
         return TokenResponse(
             access_token=access_token,

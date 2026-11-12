@@ -39,7 +39,7 @@ class TestLiveTradingEndpoints:
 
     @pytest.mark.asyncio
     async def test_order_without_credentials_is_refused_not_faked(
-        self, client: AsyncClient, auth_headers: dict, stub_binance
+        self, client: AsyncClient, auth_headers: dict, live_trader, stub_binance
     ) -> None:
         """With no exchange credentials the order fails loudly.
 
@@ -64,7 +64,7 @@ class TestLiveTradingEndpoints:
 
     @pytest.mark.asyncio
     async def test_order_blocked_while_halted(
-        self, client: AsyncClient, auth_headers: dict, stub_binance
+        self, client: AsyncClient, auth_headers: dict, live_trader, stub_binance
     ) -> None:
         """A halted account cannot place orders."""
         await client.post("/api/v1/live/kill-switch", headers=auth_headers)

@@ -114,6 +114,9 @@ class ActivateKillSwitchTool(Tool[_KillSwitchArgs]):
     )
     args_model = _KillSwitchArgs
     mutating = True
+    # Cancels real exchange orders with signed requests, so it needs the
+    # exchange permission as well as the mutation one.
+    exchange_action = True
 
     async def _run(self, args: _KillSwitchArgs, ctx: ToolContext) -> ToolResult:
         user_id = self._require_user(ctx)
@@ -132,4 +135,6 @@ async def _resolve_account_id(
     if account_id:
         return uuid.UUID(account_id)
     accounts = await service.list_accounts(user_id)
+    # Oldest first, so "the default account" is the same one on every call.
+    accounts = sorted(accounts, key=lambda a: (a.created_at, str(a.id)))
     return accounts[0].id if accounts else None

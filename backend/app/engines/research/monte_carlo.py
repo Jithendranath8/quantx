@@ -13,6 +13,11 @@ import numpy as np
 from pydantic import BaseModel
 
 MAX_SIMULATIONS = 50_000
+# Ceiling on simulations x trades for one run. At roughly 40 bytes per cell an
+# uncapped request reached gigabytes; this keeps the whole run to a bounded
+# amount of CPU, and CHUNK_CELLS keeps its peak memory near 100 MB.
+MAX_TOTAL_CELLS = 20_000_000
+CHUNK_CELLS = 2_000_000
 RUIN_THRESHOLD_PCT = 0.5  # Equity at or below 50% of starting capital.
 
 
@@ -72,19 +77,35 @@ class MonteCarloEngine:
         pnls = np.asarray(trades_pnl, dtype=float)
         n_trades = len(pnls)
 
-        # Vectorized: draw every path at once instead of looping in Python.
-        draws = rng.choice(pnls, size=(num_simulations, n_trades), replace=True)
-        equity_paths = np.hstack(
-            [np.full((num_simulations, 1), initial_capital), initial_capital + np.cumsum(draws, axis=1)]
-        )
+        # Bound the work by simulations x trades, not by simulations alone. The
+        # simulation count was capped but the product was not, so a strategy
+        # with many trades turned one request into gigabytes of arrays in the
+        # shared API process. Above the budget the simulation count is reduced
+        # and the summary reports the number actually run.
+        num_simulations = max(1, min(num_simulations, MAX_TOTAL_CELLS // n_trades))
 
-        final_equities = equity_paths[:, -1]
+        final_equities = np.empty(num_simulations, dtype=float)
+        max_drawdowns = np.empty(num_simulations, dtype=float)
+        longest_streaks = np.empty(num_simulations, dtype=int)
 
-        running_peak = np.maximum.accumulate(equity_paths, axis=1)
-        # Guard against a peak of zero, which a ruinous path can reach.
-        safe_peak = np.where(running_peak == 0, np.nan, running_peak)
-        drawdowns = (running_peak - equity_paths) / safe_peak
-        max_drawdowns = np.nan_to_num(np.nanmax(drawdowns, axis=1)) * 100
+        # Paths are simulated in fixed-size chunks and only three numbers per
+        # path are kept, so peak memory is set by the chunk, not the request.
+        chunk_size = max(1, CHUNK_CELLS // n_trades)
+        for start in range(0, num_simulations, chunk_size):
+            stop = min(start + chunk_size, num_simulations)
+            rows = stop - start
+            draws = rng.choice(pnls, size=(rows, n_trades), replace=True)
+            equity_paths = np.hstack(
+                [np.full((rows, 1), initial_capital), initial_capital + np.cumsum(draws, axis=1)]
+            )
+            final_equities[start:stop] = equity_paths[:, -1]
+
+            running_peak = np.maximum.accumulate(equity_paths, axis=1)
+            # Guard against a peak of zero, which a ruinous path can reach.
+            safe_peak = np.where(running_peak == 0, np.nan, running_peak)
+            drawdowns = (running_peak - equity_paths) / safe_peak
+            max_drawdowns[start:stop] = np.nan_to_num(np.nanmax(drawdowns, axis=1)) * 100
+            longest_streaks[start:stop] = MonteCarloEngine._longest_losing_streaks(draws)
 
         ruin_count = int(np.sum(final_equities <= initial_capital * RUIN_THRESHOLD_PCT))
 
@@ -97,10 +118,21 @@ class MonteCarloEngine:
             probability_of_ruin_pct=round(ruin_count / num_simulations * 100, 2),
             worst_case_drawdown_95_pct=round(float(np.percentile(max_drawdowns, 95)), 2),
             median_max_drawdown_pct=round(float(np.median(max_drawdowns)), 2),
-            expected_longest_losing_streak=MonteCarloEngine._expected_losing_streak(draws),
+            expected_longest_losing_streak=round(float(np.mean(longest_streaks))),
             percentile_5_equity=round(float(np.percentile(final_equities, 5)), 2),
             percentile_95_equity=round(float(np.percentile(final_equities, 95)), 2),
         )
+
+    @staticmethod
+    def _longest_losing_streaks(draws: np.ndarray) -> np.ndarray:
+        """Longest run of consecutive losses on each simulated path."""
+        losses = draws <= 0
+        longest = np.zeros(losses.shape[0], dtype=int)
+        current = np.zeros(losses.shape[0], dtype=int)
+        for column in range(losses.shape[1]):
+            current = np.where(losses[:, column], current + 1, 0)
+            longest = np.maximum(longest, current)
+        return longest
 
     @staticmethod
     def _expected_losing_streak(draws: np.ndarray) -> int:
@@ -108,10 +140,4 @@ class MonteCarloEngine:
 
         Computed from the simulation rather than returned as a constant.
         """
-        losses = draws <= 0
-        longest = np.zeros(losses.shape[0], dtype=int)
-        current = np.zeros(losses.shape[0], dtype=int)
-        for column in range(losses.shape[1]):
-            current = np.where(losses[:, column], current + 1, 0)
-            longest = np.maximum(longest, current)
-        return round(float(np.mean(longest)))
+        return round(float(np.mean(MonteCarloEngine._longest_losing_streaks(draws))))

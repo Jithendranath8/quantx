@@ -7,12 +7,14 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from app.schemas.validators import Price, Quantity, Symbol
+
 
 class CreatePaperAccountRequest(BaseModel):
     """Request to create a new paper trading account."""
 
-    name: str = Field(default="Demo Account")
-    initial_balance: float = Field(default=100000.0, ge=100.0)
+    name: str = Field(default="Demo Account", min_length=1, max_length=100)
+    initial_balance: float = Field(default=100000.0, ge=100.0, le=1e9, allow_inf_nan=False)
 
 
 class PaperAccountSchema(BaseModel):
@@ -34,16 +36,18 @@ class SubmitPaperOrderRequest(BaseModel):
     """Order placement request schema."""
 
     account_id: uuid.UUID
-    symbol: str
+    symbol: Symbol
     side: Literal["BUY", "SELL"]
     order_type: Literal["MARKET", "LIMIT", "STOP_LOSS", "TAKE_PROFIT"] = "MARKET"
-    quantity: float = Field(..., gt=0.0)
+    quantity: Quantity
+    # Every price is positive and finite: NaN compares false against any
+    # trigger, so an unbounded field could park an order that never resolves.
     # LIMIT resting price. Required for LIMIT orders.
-    price: float | None = None
+    price: Price | None = None
     # Trigger level. Required for STOP_LOSS and TAKE_PROFIT orders.
-    stop_price: float | None = None
-    stop_loss: float | None = None
-    take_profit: float | None = None
+    stop_price: Price | None = None
+    stop_loss: Price | None = None
+    take_profit: Price | None = None
 
     @model_validator(mode="after")
     def check_required_prices(self) -> "SubmitPaperOrderRequest":

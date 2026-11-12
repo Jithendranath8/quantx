@@ -22,6 +22,8 @@ def _provider_handler(
     google_verified: bool = True,
     github_verified: bool = True,
     email: str = "oauth.trader@example.com",
+    google_sub: str = "google-subject-1",
+    github_id: int = 424242,
 ) -> Any:
     seen: dict[str, Any] = {}
 
@@ -31,9 +33,12 @@ def _provider_handler(
             seen["token_form"] = parse_qs(request.content.decode())
             return httpx.Response(200, json={"access_token": "provider-token", "token_type": "bearer"})
         if url.startswith("https://openidconnect.googleapis.com/v1/userinfo"):
-            return httpx.Response(200, json={"email": email, "email_verified": google_verified, "name": "OAuth Trader"})
+            return httpx.Response(
+                200,
+                json={"sub": google_sub, "email": email, "email_verified": google_verified, "name": "OAuth Trader"},
+            )
         if url == "https://api.github.com/user":
-            return httpx.Response(200, json={"login": "octo", "name": None})
+            return httpx.Response(200, json={"id": github_id, "login": "octo", "name": None})
         if url == "https://api.github.com/user/emails":
             return httpx.Response(200, json=[{"email": email, "primary": True, "verified": github_verified}])
         return httpx.Response(404)
@@ -285,3 +290,113 @@ class TestOAuthLinking:
             headers=second_user_headers,
         )
         assert done.status_code == 401
+
+
+def _switchable_provider(monkeypatch: pytest.MonkeyPatch, **identity: Any) -> dict[str, Any]:
+    """Mock both providers behind one handler whose reported identity can change.
+
+    Returns the mutable identity; update it between sign-ins. (Calling
+    ``_mock_provider`` twice would stack two transports, and the first would
+    keep answering.)
+    """
+    who: dict[str, Any] = {
+        "google_sub": "google-subject-1",
+        "github_id": 424242,
+        "email": "oauth.trader@example.com",
+        "google_verified": True,
+        **identity,
+    }
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        url = str(request.url)
+        if url.startswith(("https://oauth2.googleapis.com/token", "https://github.com/login/oauth/access_token")):
+            return httpx.Response(200, json={"access_token": "provider-token", "token_type": "bearer"})
+        if url.startswith("https://openidconnect.googleapis.com/v1/userinfo"):
+            return httpx.Response(
+                200,
+                json={
+                    "sub": who["google_sub"],
+                    "email": who["email"],
+                    "email_verified": who["google_verified"],
+                    "name": "OAuth Trader",
+                },
+            )
+        if url == "https://api.github.com/user":
+            return httpx.Response(200, json={"id": who["github_id"], "login": "octo", "name": None})
+        if url == "https://api.github.com/user/emails":
+            return httpx.Response(200, json=[{"email": who["email"], "primary": True, "verified": True}])
+        return httpx.Response(404)
+
+    _mock_provider(monkeypatch, handler)
+    return who
+
+
+@pytest.mark.integration
+class TestOAuthIdentityBinding:
+    """Security audit lead: accounts were matched on the provider-reported email alone.
+
+    An account is now bound to the provider and the provider's own permanent
+    id for the person, so a different identity that reports the same verified
+    email does not open it.
+    """
+
+    async def _sign_in(self, client: AsyncClient, provider: str) -> dict[str, str]:
+        state = (await _start(client, provider))["state"][0]
+        callback = await client.get(f"/api/v1/auth/oauth/{provider}/callback?code=abc&state={state}")
+        assert callback.status_code == 302
+        return _fragment(callback)
+
+    async def _user_id(self, client: AsyncClient, fragment: dict[str, str]) -> str:
+        exchange = await client.post(
+            "/api/v1/auth/oauth/exchange", json={"code": fragment["code"], "client_nonce": NONCE}
+        )
+        assert exchange.status_code == 200
+        return str(exchange.json()["user"]["id"])
+
+    @pytest.mark.asyncio
+    async def test_a_different_subject_with_the_same_email_is_refused(
+        self, client: AsyncClient, oauth_enabled: None, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        who = _switchable_provider(monkeypatch, google_sub="owner")
+        assert "code" in await self._sign_in(client, "google")
+
+        who["google_sub"] = "someone-else"
+        assert await self._sign_in(client, "google") == {"error": "identity_mismatch"}
+
+    @pytest.mark.asyncio
+    async def test_another_provider_with_the_same_email_is_refused(
+        self, client: AsyncClient, oauth_enabled: None, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _switchable_provider(monkeypatch)
+        assert "code" in await self._sign_in(client, "google")
+
+        assert await self._sign_in(client, "github") == {"error": "provider_mismatch"}
+
+    @pytest.mark.asyncio
+    async def test_the_same_subject_keeps_its_account_when_the_email_changes(
+        self, client: AsyncClient, oauth_enabled: None, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        who = _switchable_provider(monkeypatch, google_sub="owner", email="old@example.com")
+        first = await self._user_id(client, await self._sign_in(client, "google"))
+
+        who["email"] = "new@example.com"
+        second = await self._user_id(client, await self._sign_in(client, "google"))
+
+        assert second == first
+
+    @pytest.mark.asyncio
+    async def test_the_owner_can_keep_signing_in(
+        self, client: AsyncClient, oauth_enabled: None, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _switchable_provider(monkeypatch, google_sub="owner")
+        first = await self._user_id(client, await self._sign_in(client, "google"))
+        second = await self._user_id(client, await self._sign_in(client, "google"))
+        assert second == first
+
+    @pytest.mark.asyncio
+    async def test_email_verified_must_be_the_boolean_true(
+        self, client: AsyncClient, oauth_enabled: None, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The string "false" is truthy; it must not count as verified."""
+        _switchable_provider(monkeypatch, google_verified="false")
+        assert await self._sign_in(client, "google") == {"error": "no_verified_email"}

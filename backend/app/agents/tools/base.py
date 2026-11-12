@@ -35,6 +35,7 @@ from typing import TYPE_CHECKING, Any, ClassVar
 
 from pydantic import BaseModel, ValidationError
 
+from app.core.exceptions import QuantXError
 from app.core.logging import get_logger
 
 if TYPE_CHECKING:
@@ -61,8 +62,21 @@ class ToolContext:
     account_balance: float = 100_000.0
     # Hard gate: mutating tools refuse to run unless this is explicitly True.
     allow_mutations: bool = False
+    # Second gate, for the few tools that act on the exchange itself.
+    allow_exchange_actions: bool = False
     # Free-form scratch space for an orchestration run (e.g. cached context).
     scratch: dict[str, Any] = field(default_factory=dict)
+
+
+async def _end_transaction(ctx: ToolContext, rollback: bool = False) -> None:
+    """Finish the session's current transaction, releasing its connection."""
+    try:
+        if rollback:
+            await ctx.session.rollback()
+        else:
+            await ctx.session.commit()
+    except Exception as exc:
+        logger.warning("tool_transaction_release_failed", error=str(exc))
 
 
 class ToolResult(BaseModel):
@@ -106,6 +120,10 @@ class Tool[ArgsT: BaseModel](ABC):
     args_model: type[ArgsT]
     #: True when the tool can change persistent or exchange state.
     mutating: ClassVar[bool] = False
+    #: True when the tool sends signed requests to the exchange. These need
+    #: their own permission on top of ``allow_mutations``: "may place paper
+    #: orders" must not silently also mean "may cancel real exchange orders".
+    exchange_action: ClassVar[bool] = False
 
     def json_schema(self) -> dict[str, Any]:
         """JSON Schema for this tool's arguments (provider-neutral)."""
@@ -127,6 +145,13 @@ class Tool[ArgsT: BaseModel](ABC):
                 started,
             )
 
+        if self.exchange_action and not ctx.allow_exchange_actions:
+            return self._err(
+                "This tool acts on the exchange and is not enabled for this agent. "
+                "Nothing was halted or cancelled.",
+                started,
+            )
+
         try:
             args = self.args_model.model_validate(raw_arguments)
         except ValidationError as exc:
@@ -136,8 +161,21 @@ class Tool[ArgsT: BaseModel](ABC):
             result = await self._run(args, ctx)
         except Exception as exc:
             logger.error("tool_execution_failed", tool=self.name, error=str(exc))
-            return self._err(f"{type(exc).__name__}: {exc}", started)
+            # A failed statement poisons the transaction for every later tool
+            # in the run; roll it back so the next call starts clean.
+            await _end_transaction(ctx, rollback=True)
+            # Domain errors carry a message written for callers. Anything else
+            # is reported by kind only: raw exception text can carry hostnames,
+            # SQL and upstream response bodies, and the model's output is
+            # returned to the user.
+            if isinstance(exc, QuantXError):
+                return self._err(f"{type(exc).__name__}: {exc.message}", started)
+            return self._err(f"{type(exc).__name__}: the tool could not complete this call", started)
 
+        # Hand the pooled connection back between tool calls. The model is
+        # consulted after each one, and a connection held idle across those
+        # waits is a connection no other request can use.
+        await _end_transaction(ctx)
         result.latency_ms = int((time.perf_counter() - started) * 1000)
         return result
 

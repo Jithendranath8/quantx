@@ -10,6 +10,8 @@ risk:reward is recomputed here from its own prices, and a mismatch is a
 rejection, not a rounding note.
 """
 
+import math
+
 from pydantic import BaseModel
 
 from app.schemas.agent import AgentDecision
@@ -18,6 +20,9 @@ from app.schemas.agent import AgentDecision
 # means it did arithmetic we cannot reproduce, which disqualifies the signal.
 RR_TOLERANCE = 0.15
 MIN_ACCEPTABLE_RR = 1.0
+# How far the model's entry may sit from the real market price. A decision
+# priced nowhere near the market is not a trade plan, whatever its ratios say.
+MAX_ENTRY_DEVIATION = 0.10
 
 
 class ValidationResult(BaseModel):
@@ -92,6 +97,28 @@ class AIDecisionValidator:
         # The structural check above returns on any missing level, so entry,
         # stop and target are all present from here on.
         assert entry is not None and stop_loss is not None and take_profit is not None
+
+        # Every level must be a real, positive number. NaN and infinity pass
+        # ordinary comparisons in surprising ways (NaN >= x is always False),
+        # so they are refused outright instead of being reasoned about.
+        for label, level in (("entry", entry), ("stop_loss", stop_loss), ("take_profit", take_profit)):
+            if not math.isfinite(level) or level <= 0:
+                rejections.append(f"Non-finite or non-positive {label}: {level}")
+        if rejections:
+            return ValidationResult(
+                is_valid=False,
+                rejection_reasons=rejections,
+                calculated_risk_reward=0.0,
+                calculated_position_size_usd=round(max(0.0, calculated_size), 2),
+            )
+
+        # The model's own entry is checked against the market. Without this an
+        # entry of 1 against a market of 50,000 validated as long as its ratios
+        # were self-consistent.
+        if current_price > 0 and abs(entry - current_price) / current_price > MAX_ENTRY_DEVIATION:
+            rejections.append(
+                f"Entry price ({entry}) is more than {MAX_ENTRY_DEVIATION:.0%} from the market ({current_price})"
+            )
 
         # 2. Price sanity: the stop must be on the losing side of entry and the
         #    target on the winning side, for the stated direction.

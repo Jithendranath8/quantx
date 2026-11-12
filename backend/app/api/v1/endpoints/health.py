@@ -15,7 +15,7 @@ import time
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from sqlalchemy import case, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -23,7 +23,7 @@ from app.agents.single_shot import FALLBACK_REASONING_PREFIX
 from app.connectors.binance_client import get_binance_client
 from app.core.celery_app import celery_app
 from app.core.config import get_settings
-from app.core.dependencies import CurrentUser, DBSession
+from app.core.dependencies import CurrentUser, DBSession, RateLimiter
 from app.core.logging import get_logger
 from app.core.metrics import SYSTEM_HEALTH_GAUGE
 from app.core.redis import get_redis_client
@@ -60,6 +60,7 @@ async def _timed(coro: Any) -> tuple[bool, float, str | None]:
 @router.get(
     "/stream",
     summary="Market data stream availability",
+    dependencies=[Depends(RateLimiter("health_stream", max_requests=120))],
 )
 async def stream_status(user: CurrentUser) -> dict[str, Any]:
     """Report whether a live WebSocket subscription is worth opening.
@@ -103,11 +104,20 @@ async def stream_status(user: CurrentUser) -> dict[str, Any]:
 @router.get(
     "/system",
     summary="Comprehensive system health status",
+    # Each call probes the broker and the exchange, so it is throttled.
+    dependencies=[Depends(RateLimiter("health_system", max_requests=20))],
 )
 async def system_health_center(user: CurrentUser, db: DBSession) -> dict[str, Any]:
-    """Probe every subsystem and report measured status."""
+    """Probe every subsystem and report measured status.
+
+    Operational detail (raw probe errors, worker names, the model endpoint,
+    platform-wide AI call counts) is returned to
+    superusers only. Everyone else gets the same statuses without it.
+    """
     settings = get_settings()
     subsystems: dict[str, Any] = {}
+    is_operator = bool(user.is_superuser)
+    user_id = user.id
 
     # ── Database ─────────────────────────────────────────────────────
     async def _db_probe() -> bool:
@@ -115,6 +125,20 @@ async def system_health_center(user: CurrentUser, db: DBSession) -> dict[str, An
 
     db_ok, db_ms, db_err = await _timed(_db_probe())
     subsystems["database"] = _entry(db_ok, db_ms, db_err)
+
+    # Everything that needs the database is read now, and the transaction is
+    # ended before the slow external probes below. Holding the pooled
+    # connection across them let a few concurrent calls exhaust the pool.
+    ai_status = await _ai_service_status(db, settings, None if is_operator else user_id)
+    risk_state = await RiskStateService(db).get_or_create(user_id)
+    halted = risk_state.circuit_breaker_active
+    risk_entry = {
+        "status": "CIRCUIT_BREAKER_HALT" if halted else "ACTIVE",
+        "healthy": not halted,
+        "reason": risk_state.circuit_breaker_reason,
+        "daily_loss_usd": risk_state.daily_loss_usd,
+    }
+    await db.commit()
 
     # ── Redis ────────────────────────────────────────────────────────
     async def _redis_probe() -> bool:
@@ -182,7 +206,7 @@ async def system_health_center(user: CurrentUser, db: DBSession) -> dict[str, An
     # health check that cannot detect the most common real failure. The recent
     # decision log is consulted instead, which costs nothing and reflects what
     # actually happened on the last calls.
-    subsystems["ai_service"] = await _ai_service_status(db, settings)
+    subsystems["ai_service"] = ai_status
 
     # ── Execution engine ─────────────────────────────────────────────
     # No exchange credentials is a safe, valid configuration — the platform runs
@@ -200,14 +224,7 @@ async def system_health_center(user: CurrentUser, db: DBSession) -> dict[str, An
     }
 
     # ── Risk engine (persisted state) ────────────────────────────────
-    risk_state = await RiskStateService(db).get_or_create(user.id)
-    halted = risk_state.circuit_breaker_active
-    subsystems["risk_engine"] = {
-        "status": "CIRCUIT_BREAKER_HALT" if halted else "ACTIVE",
-        "healthy": not halted,
-        "reason": risk_state.circuit_breaker_reason,
-        "daily_loss_usd": risk_state.daily_loss_usd,
-    }
+    subsystems["risk_engine"] = risk_entry
 
     subsystems["api_server"] = {"status": "ONLINE", "healthy": True}
 
@@ -219,6 +236,9 @@ async def system_health_center(user: CurrentUser, db: DBSession) -> dict[str, An
 
     SYSTEM_HEALTH_GAUGE.set(1 if overall_ok else 0)
 
+    if not is_operator:
+        _redact_operational_detail(subsystems)
+
     return {
         "status": "HEALTHY" if overall_ok and not degraded else ("DEGRADED" if overall_ok else "UNHEALTHY"),
         "checked_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
@@ -226,8 +246,33 @@ async def system_health_center(user: CurrentUser, db: DBSession) -> dict[str, An
     }
 
 
-async def _ai_service_status(db: AsyncSession, settings: Any) -> dict[str, Any]:
-    """Report AI availability from configuration plus recent call outcomes."""
+# Fields that describe the deployment itself and are of no use to an ordinary
+# user: where the model is hosted and which workers exist. They are stripped
+# from non-operator responses. ``mainnet_trading_enabled`` deliberately stays:
+# the live-trading page uses it to warn that orders move real funds.
+_OPERATOR_ONLY_FIELDS = ("endpoint", "workers")
+
+
+def _redact_operational_detail(subsystems: dict[str, Any]) -> None:
+    """Remove deployment detail from a health report, in place."""
+    for entry in subsystems.values():
+        if not isinstance(entry, dict):
+            continue
+        for field in _OPERATOR_ONLY_FIELDS:
+            entry.pop(field, None)
+        # A raw probe error can quote hostnames, credentials in URLs or driver
+        # internals. Say that it failed, not how.
+        if entry.get("error"):
+            entry["error"] = "probe failed"
+
+
+async def _ai_service_status(db: AsyncSession, settings: Any, user_id: Any = None) -> dict[str, Any]:
+    """Report AI availability from configuration plus recent call outcomes.
+
+    Args:
+        user_id: Count only this user's decisions. None counts everyone's and
+            is used for operators only.
+    """
     # A self-hosted endpoint needs no key, so key presence is not the test.
     if not settings.agent_runtime_configured:
         return {
@@ -258,7 +303,10 @@ async def _ai_service_status(db: AsyncSession, settings: Any) -> dict[str, Any]:
                 func.count().label("total"),
                 func.sum(case((AIDecisionLog.action == "WAIT", 1), else_=0)).label("waits"),
                 func.sum(case((reasoning.startswith(FALLBACK_REASONING_PREFIX), 1), else_=0)).label("failures"),
-            ).where(AIDecisionLog.timestamp >= since)
+            ).where(
+                AIDecisionLog.timestamp >= since,
+                *([AIDecisionLog.user_id == user_id] if user_id is not None else []),
+            )
         )
     ).one()
 

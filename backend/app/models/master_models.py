@@ -195,6 +195,9 @@ class ExperimentRecord(Base):
         default=uuid.uuid4,
     )
     experiment_id: Mapped[str] = mapped_column(String(64), nullable=False, unique=True, index=True)
+    # Who ran it. Each user sees their own experiments; rows from before this
+    # column existed have no owner and are visible to superusers only.
+    user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True, index=True)
     strategy_name: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
     strategy_version: Mapped[str] = mapped_column(String(20), nullable=False, default="v1.0")
     parameters: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)

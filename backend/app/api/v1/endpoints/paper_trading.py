@@ -8,9 +8,9 @@ resolves the account through the service, which enforces
 
 import uuid
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Depends, Query
 
-from app.core.dependencies import CurrentUser, DBSession
+from app.core.dependencies import CurrentUser, DBSession, RateLimiter
 from app.schemas.paper_trading import (
     CreatePaperAccountRequest,
     PaperAccountSchema,
@@ -28,6 +28,7 @@ router = APIRouter(prefix="/paper", tags=["Paper Trading Engine"])
     response_model=PaperAccountSchema,
     status_code=201,
     summary="Create a virtual paper trading account",
+    dependencies=[Depends(RateLimiter("paper_account_create", max_requests=10))],
 )
 async def create_account(
     req: CreatePaperAccountRequest,
@@ -70,6 +71,9 @@ async def get_account(
     response_model=PaperOrderSchema,
     status_code=201,
     summary="Submit a paper order",
+    # Each order costs an exchange price lookup on the operator's shared
+    # request budget, so it is limited like the other exchange-backed routes.
+    dependencies=[Depends(RateLimiter("paper_orders", max_requests=60))],
 )
 async def submit_paper_order(
     req: SubmitPaperOrderRequest,
@@ -145,6 +149,7 @@ async def cancel_paper_order(
 @router.post(
     "/accounts/{account_id}/process-pending",
     summary="Trigger any resting orders the market has reached",
+    dependencies=[Depends(RateLimiter("paper_process_pending", max_requests=20))],
 )
 async def process_pending(
     account_id: uuid.UUID,
@@ -165,6 +170,7 @@ async def process_pending(
     "/accounts/{account_id}/mark-to-market",
     response_model=list[PaperPositionSchema],
     summary="Refresh position prices and unrealized PnL",
+    dependencies=[Depends(RateLimiter("paper_mark_to_market", max_requests=30))],
 )
 async def mark_to_market(
     account_id: uuid.UUID,

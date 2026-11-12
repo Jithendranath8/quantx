@@ -26,7 +26,7 @@ simply by supplying its UUID.
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.connectors.binance_client import BinanceClient, get_binance_client
@@ -46,6 +46,11 @@ logger = get_logger(__name__)
 SLIPPAGE_PCT = 0.0005  # 0.05%
 FEE_RATE = 0.00075  # 0.075% taker
 
+# Ceilings on what one user can park in shared state. The fill sweep visits
+# every pending order of every user each minute.
+MAX_ACCOUNTS_PER_USER = 10
+MAX_PENDING_ORDERS_PER_ACCOUNT = 50
+
 
 class PaperTradingService:
     """Service handling paper trading accounts, order fills, and positions."""
@@ -56,7 +61,16 @@ class PaperTradingService:
         self._risk_state = RiskStateService(session)
 
     async def create_account(self, user_id: uuid.UUID, req: CreatePaperAccountRequest) -> PaperAccount:
-        """Create a new virtual paper account."""
+        """Create a new virtual paper account.
+
+        Raises:
+            ValidationError: If the user already has the maximum number of accounts.
+        """
+        existing = await self._session.scalar(
+            select(func.count()).select_from(PaperAccount).where(PaperAccount.user_id == user_id)
+        )
+        if (existing or 0) >= MAX_ACCOUNTS_PER_USER:
+            raise ValidationError(f"A user can have at most {MAX_ACCOUNTS_PER_USER} paper accounts")
         account = PaperAccount(
             user_id=user_id,
             name=req.name,
@@ -189,8 +203,20 @@ class PaperTradingService:
         and the order is rejected then if the account can no longer afford it.
         """
         trigger = req.price if req.order_type.upper() == "LIMIT" else req.stop_price
-        if trigger is None or trigger <= 0:
+        if trigger is None or not trigger > 0:
             raise ValidationError(f"{req.order_type} orders require a positive trigger price")
+
+        # Every resting order costs the shared fill sweep a price lookup and a
+        # trigger check each minute, for every user, so the backlog is capped.
+        resting = await self._session.scalar(
+            select(func.count())
+            .select_from(PaperOrder)
+            .where(PaperOrder.account_id == account.id, PaperOrder.status == "PENDING")
+        )
+        if (resting or 0) >= MAX_PENDING_ORDERS_PER_ACCOUNT:
+            raise ValidationError(
+                f"An account can have at most {MAX_PENDING_ORDERS_PER_ACCOUNT} resting orders; cancel some first"
+            )
 
         if side == "BUY":
             await self._enforce_risk(account, symbol, trigger * req.quantity, trigger, req.stop_loss)
@@ -253,7 +279,7 @@ class PaperTradingService:
             except Exception as exc:
                 logger.warning("pending_order_price_failed", symbol=symbol, error=str(exc))
 
-        triggered = rejected = still_pending = 0
+        triggered = rejected = still_pending = failed = 0
         for order in pending:
             price = prices.get(order.symbol)
             if price is None:
@@ -263,18 +289,41 @@ class PaperTradingService:
                 still_pending += 1
                 continue
 
+            # Read before the savepoint: a rollback expires the object, and
+            # touching it afterwards would need a lazy load.
+            order_id = order.id
             try:
-                await self._fill_resting_order(order, price)
-                triggered += 1
+                # Each fill is its own savepoint and is flushed before the next
+                # one starts. Without the flush a later order in the same sweep
+                # could not see this fill, so it slipped past the risk limits
+                # and opened a second position row for the same symbol.
+                async with self._session.begin_nested():
+                    filled = await self._fill_resting_order(order, price)
+                    await self._session.flush()
+                if filled:
+                    triggered += 1
+                else:
+                    still_pending += 1
             except (ValidationError, RiskLimitExceededError) as exc:
-                order.status = "REJECTED"
-                rejected += 1
-                logger.warning(
-                    "pending_order_rejected", order_id=str(order.id), reason=exc.message
+                await self._session.execute(
+                    update(PaperOrder).where(PaperOrder.id == order_id).values(status="REJECTED")
                 )
+                rejected += 1
+                logger.warning("pending_order_rejected", order_id=str(order_id), reason=exc.message)
+            except Exception as exc:
+                # One order must never abort the sweep: this job fills every
+                # user's resting orders, so an unhandled error here used to
+                # stop all of them, on every run, for as long as it recurred.
+                failed += 1
+                logger.error("pending_order_fill_failed", order_id=str(order_id), error=str(exc))
 
         await self._session.commit()
-        return {"triggered": triggered, "rejected": rejected, "still_pending": still_pending}
+        return {
+            "triggered": triggered,
+            "rejected": rejected,
+            "still_pending": still_pending,
+            "failed": failed,
+        }
 
     @staticmethod
     def _is_triggered(order: PaperOrder, price: float) -> bool:
@@ -293,8 +342,12 @@ class PaperTradingService:
             return price >= trigger if order.side == "SELL" else price <= trigger
         return False
 
-    async def _fill_resting_order(self, order: PaperOrder, market_price: float) -> None:
+    async def _fill_resting_order(self, order: PaperOrder, market_price: float) -> bool:
         """Execute a triggered order against the account and its position.
+
+        Returns:
+            False when the order was no longer pending by the time the account
+            lock was held (cancelled, or filled by a concurrent sweep).
 
         Raises:
             ValidationError: If the account can no longer afford the fill, or
@@ -303,6 +356,12 @@ class PaperTradingService:
         account = await self._session.get(PaperAccount, order.account_id, with_for_update=True)
         if account is None:
             raise ValidationError("Paper account no longer exists")
+
+        # The order was read before the lock was taken; look again now that no
+        # other sweep or cancel can change it.
+        await self._session.refresh(order)
+        if order.status != "PENDING":
+            return False
 
         # A stop fills at the market it triggered into, not at its trigger
         # price; a limit fills at its resting price or better.
@@ -343,6 +402,7 @@ class PaperTradingService:
             order_type=order.order_type,
             fill_price=fill_price,
         )
+        return True
 
     async def cancel_order(self, user_id: uuid.UUID, order_id: uuid.UUID) -> PaperOrder:
         """Cancel a resting order the caller owns.
@@ -514,17 +574,24 @@ class PaperTradingService:
             PaperOrder.account_id == account_id,
             PaperOrder.filled_at >= midnight,
         )
-        net = float((await self._session.execute(stmt)).scalar_one())
+        net = float((await self._session.execute(stmt)).scalar_one() or 0.0)
         return max(0.0, -net)
 
     async def _get_open_position(self, account_id: uuid.UUID, symbol: str) -> PaperPosition | None:
         """Find the open position for a symbol on an account, if any."""
-        stmt = select(PaperPosition).where(
-            PaperPosition.account_id == account_id,
-            PaperPosition.symbol == symbol,
-            PaperPosition.status == "OPEN",
+        stmt = (
+            select(PaperPosition)
+            .where(
+                PaperPosition.account_id == account_id,
+                PaperPosition.symbol == symbol,
+                PaperPosition.status == "OPEN",
+            )
+            # A unique index guarantees one row. Ordering and taking the first
+            # keeps this from raising if the data ever disagrees.
+            .order_by(PaperPosition.created_at, PaperPosition.id)
+            .limit(1)
         )
-        return (await self._session.execute(stmt)).scalar_one_or_none()
+        return (await self._session.execute(stmt)).scalars().first()
 
     def _apply_buy(
         self,

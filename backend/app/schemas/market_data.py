@@ -9,6 +9,8 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.schemas.validators import Symbol, Timeframe
+
 
 class CandleSchema(BaseModel):
     """OHLCV Candle response schema."""
@@ -61,6 +63,6 @@ class OrderbookSchema(BaseModel):
 class DownloadHistoryRequest(BaseModel):
     """Request schema for triggering a historical data download task."""
 
-    symbol: str = Field(..., json_schema_extra={"example": "BTCUSDT"})
-    timeframe: str = Field(..., json_schema_extra={"example": "1m"})
+    symbol: Symbol = Field(..., json_schema_extra={"example": "BTCUSDT"})
+    timeframe: Timeframe = Field(..., json_schema_extra={"example": "1m"})
     days: int = Field(default=30, ge=1, le=365, description="Number of historical days to download")

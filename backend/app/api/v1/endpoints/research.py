@@ -14,6 +14,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, Query
 from starlette.concurrency import run_in_threadpool
 
+from app.api.params import StrategyNameQuery, SymbolQuery, TimeframeQuery
 from app.core.dependencies import CurrentUser, DBSession, RateLimiter
 from app.core.exceptions import ValidationError
 from app.engines.research.bias_detector import BiasCheckReport, LookAheadBiasDetector
@@ -48,9 +49,9 @@ _research_limit = Depends(RateLimiter("research", max_requests=5))
 async def run_walk_forward(
     user: CurrentUser,
     db: DBSession,
-    strategy_name: str = Query("ema_crossover"),
-    symbol: str = Query("BTCUSDT"),
-    timeframe: str = Query("1h"),
+    strategy_name: StrategyNameQuery = "ema_crossover",
+    symbol: SymbolQuery = "BTCUSDT",
+    timeframe: TimeframeQuery = "1h",
     num_windows: int = Query(4, ge=1, le=20),
     register: bool = Query(True, description="Record the run in the experiment registry"),
 ) -> WalkForwardResult:
@@ -67,6 +68,7 @@ async def run_walk_forward(
 
     if register and result.total_windows > 0:
         await ExperimentRegistryService(db).register_from_dataset(
+            user_id=user.id,
             strategy_name=strategy_name,
             df=df,
             symbol=symbol,
@@ -95,9 +97,9 @@ async def run_walk_forward(
 async def run_optimization(
     user: CurrentUser,
     db: DBSession,
-    strategy_name: str = Query("ema_crossover"),
-    symbol: str = Query("BTCUSDT"),
-    timeframe: str = Query("1h"),
+    strategy_name: StrategyNameQuery = "ema_crossover",
+    symbol: SymbolQuery = "BTCUSDT",
+    timeframe: TimeframeQuery = "1h",
     method: str = Query("GRID_SEARCH", pattern="^(GRID_SEARCH|RANDOM_SEARCH|TPE)$"),
     max_evaluations: int = Query(50, ge=1, le=200),
     register: bool = Query(True, description="Record the run in the experiment registry"),
@@ -125,6 +127,7 @@ async def run_optimization(
         # Recording the dataset fingerprint alongside the winning parameters is
         # what makes the result reproducible later.
         await ExperimentRegistryService(db).register_from_dataset(
+            user_id=user.id,
             strategy_name=strategy_name,
             df=df,
             symbol=symbol,
@@ -159,9 +162,9 @@ async def run_optimization(
 async def run_monte_carlo(
     user: CurrentUser,
     db: DBSession,
-    strategy_name: str = Query("ema_crossover"),
-    symbol: str = Query("BTCUSDT"),
-    timeframe: str = Query("1h"),
+    strategy_name: StrategyNameQuery = "ema_crossover",
+    symbol: SymbolQuery = "BTCUSDT",
+    timeframe: TimeframeQuery = "1h",
     num_simulations: int = Query(1000, ge=100, le=50_000),
     initial_capital: float = Query(10_000.0, gt=0),
 ) -> MonteCarloSummary:
@@ -200,9 +203,9 @@ async def run_monte_carlo(
 async def audit_bias(
     user: CurrentUser,
     db: DBSession,
-    strategy_name: str = Query("ema_crossover"),
-    symbol: str = Query("BTCUSDT"),
-    timeframe: str = Query("1h"),
+    strategy_name: StrategyNameQuery = "ema_crossover",
+    symbol: SymbolQuery = "BTCUSDT",
+    timeframe: TimeframeQuery = "1h",
 ) -> BiasCheckReport:
     """Compare signals computed with and without future data visible."""
     df = await BacktestService(db).load_candles(symbol, timeframe, limit=2000)
@@ -220,7 +223,10 @@ async def list_experiments(
     offset: int = Query(0, ge=0),
 ) -> list[dict[str, Any]]:
     """Fetch a page of registered experiments."""
-    records = await ExperimentRegistryService(db).list_experiments(limit=limit, offset=offset)
+    # Each user sees their own research; an operator sees all of it.
+    records = await ExperimentRegistryService(db).list_experiments(
+        limit=limit, offset=offset, user_id=None if user.is_superuser else user.id
+    )
     return [
         {
             "experiment_id": r.experiment_id,

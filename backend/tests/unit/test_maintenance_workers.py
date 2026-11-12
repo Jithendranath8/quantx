@@ -201,6 +201,8 @@ class TestReconciliation:
         await db_session.commit()
 
         class Client:
+            testnet = True
+
             async def get_open_orders(self, symbol: str | None = None) -> list[dict]:
                 return [
                     {
@@ -239,6 +241,8 @@ class TestReconciliation:
         await db_session.commit()
 
         class BrokenClient:
+            testnet = True
+
             async def get_open_orders(self, symbol: str | None = None) -> list[dict]:
                 raise RuntimeError("exchange unreachable")
 
@@ -255,6 +259,8 @@ class TestReconciliation:
         """The reconciliation timestamp is generated, not a fixed literal."""
 
         class Client:
+            testnet = True
+
             async def get_open_orders(self, symbol: str | None = None) -> list[dict]:
                 return []
 

@@ -33,6 +33,7 @@ from app.core.exceptions import (
     ValidationError,
 )
 from app.core.logging import get_logger, setup_logging
+from app.core.middleware import BodySizeLimitMiddleware, SecurityHeadersMiddleware
 from app.core.redis import close_redis, get_redis_client
 from app.websockets.binance_stream import start_market_stream, stop_market_stream
 from app.workers.market_data import _sync_market_data
@@ -70,8 +71,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     setup_logging()
     logger.info("application_starting", app_name=settings.app_name, env=settings.app_env)
 
-    # Refuse to run production on development defaults.
+    # Refuse to run on the published default secrets, in any environment.
     settings.validate_production_safety()
+    for warning in settings.production_warnings():
+        logger.warning("insecure_production_setting", detail=warning)
 
     if settings.mainnet_trading_enabled:
         logger.warning(
@@ -135,6 +138,11 @@ app.add_middleware(
     allow_headers=["Authorization", "Content-Type", "Accept"],
 )
 
+# Added after CORS so they sit outside it: an oversized body is refused before
+# anything else looks at the request, and every response carries the headers.
+app.add_middleware(SecurityHeadersMiddleware)
+app.add_middleware(BodySizeLimitMiddleware, max_bytes=settings.max_request_body_bytes)
+
 # ── Prometheus Instrumentation ───────────────────────────────────────
 
 _metrics_auth = HTTPBasic(auto_error=False)
@@ -151,8 +159,11 @@ def _verify_metrics_access(
     """
     if not settings.metrics_require_auth:
         return
+    expected = settings.metrics_password or settings.secret_key
+    # Compared as bytes: compare_digest raises on non-ASCII str, which turned a
+    # wrong password into a 500 instead of a 401.
     if credentials is None or not secrets.compare_digest(
-        credentials.password, settings.secret_key
+        credentials.password.encode("utf-8"), expected.encode("utf-8")
     ):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

@@ -168,7 +168,7 @@ class TestLiveTradingService:
 
         service = LiveTradingService(db_session, client=ExplodingClient())
         with pytest.raises(RiskLimitExceededError, match="circuit breaker is ACTIVE"):
-            await service.execute_live_order(test_user.id, order_request(price=None))
+            await service.execute_live_order(test_user.id, order_request(order_type="MARKET", price=None))
 
     @pytest.mark.asyncio
     async def test_indeterminate_submit_is_flagged_for_reconciliation(

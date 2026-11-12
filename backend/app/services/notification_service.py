@@ -6,6 +6,7 @@ via Webhook and Telegram.
 """
 
 import asyncio
+import html
 from typing import Any
 
 import httpx
@@ -16,6 +17,11 @@ from app.core.logging import get_logger
 logger = get_logger(__name__)
 
 _TIMEOUT = httpx.Timeout(5.0, connect=3.0)
+
+
+def _escape(text: str) -> str:
+    """Escape text for Telegram's HTML parse mode (it needs only <, > and &)."""
+    return html.escape(str(text), quote=False)
 
 
 class NotificationService:
@@ -57,7 +63,11 @@ class NotificationService:
                 NotificationService._post_telegram(
                     settings.telegram_bot_token,
                     settings.telegram_chat_id,
-                    f"<b>[{level}] {title}</b>\n{message}",
+                    # Escaped here, where the markup is added, so every caller
+                    # is covered. Alert text includes user-supplied values (a
+                    # kill-switch reason, for one); unescaped, a user could put
+                    # their own link or formatting in the operator's alert.
+                    f"<b>[{_escape(level)}] {_escape(title)}</b>\n{_escape(message)}",
                 )
             )
 
@@ -76,7 +86,9 @@ class NotificationService:
                 response.raise_for_status()
             return True
         except Exception as e:
-            logger.error("webhook_dispatch_failed", error=str(e))
+            # The exception type only: httpx error text includes the request
+            # URL, and a webhook URL usually embeds its own secret.
+            logger.error("webhook_dispatch_failed", error=type(e).__name__)
             return False
 
     @staticmethod
@@ -91,5 +103,7 @@ class NotificationService:
                 response.raise_for_status()
             return True
         except Exception as e:
-            logger.error("telegram_dispatch_failed", error=str(e))
+            # Never log str(e): the request URL in it contains the bot token.
+            status_code = getattr(getattr(e, "response", None), "status_code", None)
+            logger.error("telegram_dispatch_failed", error=type(e).__name__, status=status_code)
             return False

@@ -122,14 +122,64 @@ def test_jwt_secret_must_differ_from_secret_key() -> None:
         s.validate_production_safety()
 
 
-def test_development_allows_the_shipped_defaults() -> None:
-    # Local dev may run on defaults; the guard must not fire there.
+def test_unset_app_env_does_not_excuse_the_published_secrets() -> None:
+    # Security audit finding 5. APP_ENV defaults to "development", so a
+    # deployment that forgets it used to start on the keys published in this
+    # repository and accept forged tokens. An unset APP_ENV must fail closed.
+    s = Settings(  # type: ignore[call-arg]
+        secret_key=DEFAULT_SECRET_KEY,
+        jwt_secret_key=DEFAULT_JWT_SECRET_KEY,
+        allow_insecure_dev_defaults=False,
+    )
+    assert s.app_env == "development"
+    with pytest.raises(RuntimeError, match="SECRET_KEY is still the default"):
+        s.validate_production_safety()
+
+
+def test_development_runs_on_defaults_only_with_the_explicit_opt_in() -> None:
     s = Settings(  # type: ignore[call-arg]
         app_env="development",
         secret_key=DEFAULT_SECRET_KEY,
         jwt_secret_key=DEFAULT_JWT_SECRET_KEY,
+        allow_insecure_dev_defaults=True,
     )
     s.validate_production_safety()  # must not raise
+
+
+@pytest.mark.parametrize("env", ["staging", "production"])
+def test_the_dev_opt_in_is_refused_outside_development(env: str) -> None:
+    s = Settings(  # type: ignore[call-arg]
+        app_env=env,
+        secret_key="a" * 48,
+        jwt_secret_key="b" * 48,
+        allow_insecure_dev_defaults=True,
+        DATABASE_URL="postgresql://u:p@ep.neon.tech/db",
+        REDIS_URL="rediss://default:tok@up.upstash.io:6379",
+    )
+    with pytest.raises(RuntimeError, match="ALLOW_INSECURE_DEV_DEFAULTS"):
+        s.validate_production_safety()
+
+
+def test_development_with_real_secrets_needs_no_opt_in() -> None:
+    s = Settings(app_env="development", secret_key="a" * 48, jwt_secret_key="b" * 48)  # type: ignore[call-arg]
+    s.validate_production_safety()  # must not raise
+
+
+def test_production_warnings_name_the_weak_settings() -> None:
+    s = _prod_settings(
+        DATABASE_URL="postgresql://u:p@ep.neon.tech/db",
+        REDIS_URL="rediss://default:tok@up.upstash.io:6379",
+        rate_limit_enabled=False,
+        # Set explicitly: the metrics warning only applies while metrics are
+        # served, and the test environment may have them switched off.
+        prometheus_enabled=True,
+        metrics_require_auth=False,
+        allowed_origins="http://localhost:5173",
+        forwarded_allow_ips="127.0.0.1",
+    )
+    text = " | ".join(s.production_warnings())
+    for expected in ("RATE_LIMIT_ENABLED", "METRICS_REQUIRE_AUTH", "ALLOWED_ORIGINS", "FORWARDED_ALLOW_IPS"):
+        assert expected in text
 
 
 def test_retired_groq_model_maps_to_its_replacement() -> None:
@@ -141,3 +191,18 @@ def test_retired_groq_model_maps_to_its_replacement() -> None:
 def test_current_model_name_is_left_alone() -> None:
     s = Settings(openai_model="qwen2.5:3b")  # type: ignore[call-arg]
     assert s.openai_model == "qwen2.5:3b"
+
+
+@pytest.mark.parametrize(
+    ("url", "expected"),
+    [
+        ("postgresql://u:p@ep.neon.tech/db?sslmode=require", "require"),
+        ("postgresql://u:p@ep.neon.tech/db?sslmode=verify-full&x=1", "verify-full"),
+        ("postgresql://u:p@ep.neon.tech/db", None),
+        ("postgresql://u:p@ep.neon.tech/db?sslmode=disable", None),
+        ("", None),
+    ],
+)
+def test_sslmode_in_database_url_reaches_the_driver(url: str, expected: str | None) -> None:
+    # The async DSN drops libpq query parameters; the TLS requirement must not go with them.
+    assert Settings(DATABASE_URL=url).database_ssl_mode == expected  # type: ignore[call-arg]

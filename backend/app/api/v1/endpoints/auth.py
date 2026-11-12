@@ -15,7 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.core.database import get_async_session
-from app.core.dependencies import CurrentUserId, RateLimiter, get_client_ip
+from app.core.dependencies import CurrentUser, CurrentUserId, RateLimiter, get_client_ip
 from app.core.exceptions import NotFoundError, OAuthSignInError, QuantXError
 from app.core.logging import get_logger
 from app.core.redis import get_redis_client
@@ -122,18 +122,21 @@ async def refresh_token(
     response_model=MessageResponse,
     summary="Logout current session",
     description="Revoke the provided refresh token, ending the current session.",
+    dependencies=[_refresh_limit],
 )
 async def logout(
     data: TokenRefreshRequest,
     request: Request,
-    user_id: CurrentUserId,
     db: Annotated[AsyncSession, Depends(get_async_session)],
 ) -> MessageResponse:
-    """Logout by revoking the refresh token."""
+    """Logout by revoking the refresh token.
+
+    Authenticated by the refresh token itself, so signing out still works after
+    the short-lived access token has expired.
+    """
     service = AuthService(db)
     return await service.logout(
         refresh_token=data.refresh_token,
-        user_id=user_id,
         ip_address=_get_client_ip(request),
     )
 
@@ -163,13 +166,9 @@ async def logout_all(
     summary="Get current user profile",
     description="Returns the profile of the currently authenticated user.",
 )
-async def get_me(
-    user_id: CurrentUserId,
-    db: Annotated[AsyncSession, Depends(get_async_session)],
-) -> UserResponse:
+async def get_me(user: CurrentUser) -> UserResponse:
     """Get the current authenticated user's profile."""
-    service = AuthService(db)
-    return await service.get_user(user_id)
+    return UserResponse.model_validate(user)
 
 
 # ── OAuth 2.0 ────────────────────────────────────────────────────────
@@ -246,11 +245,11 @@ async def oauth_callback(
         if stored.get("link_user_id"):
             linking = True
             link_code = await oauth.issue_link_code(
-                str(stored["link_user_id"]), provider, identity.email, str(stored["nonce"])
+                str(stored["link_user_id"]), provider, identity.email, str(stored["nonce"]), identity.subject
             )
             return _frontend_redirect(f"link_code={quote(link_code)}")
         user = await AuthService(db).resolve_oauth_user(
-            identity.email, identity.full_name, provider, ip_address=_get_client_ip(request)
+            identity.email, identity.full_name, provider, identity.subject, ip_address=_get_client_ip(request)
         )
         login_code = await oauth.issue_login_code(str(user.id), str(stored["nonce"]))
     except OAuthSignInError as exc:
@@ -298,8 +297,12 @@ async def oauth_link_complete(
     redis: Annotated[Redis, Depends(get_redis_client)],  # type: ignore[type-arg]
 ) -> UserResponse:
     """Attach the provider once the same user, in the same browser, confirms."""
-    provider, email = await OAuthService(redis).redeem_link_code(data.code, data.client_nonce, str(user_id))
-    user = await AuthService(db).link_oauth(str(user_id), email, provider, ip_address=_get_client_ip(request))
+    provider, email, subject = await OAuthService(redis).redeem_link_code(
+        data.code, data.client_nonce, str(user_id)
+    )
+    user = await AuthService(db).link_oauth(
+        str(user_id), email, provider, subject, ip_address=_get_client_ip(request)
+    )
     return UserResponse.model_validate(user)
 
 
