@@ -14,6 +14,7 @@ it, and ``dispose_engine`` tears it down cleanly.
 
 from collections.abc import AsyncGenerator
 from datetime import UTC, datetime
+from typing import Any
 
 from sqlalchemy import DateTime, MetaData, func
 from sqlalchemy.ext.asyncio import (
@@ -56,6 +57,14 @@ def create_engine(url: str | None = None) -> AsyncEngine:
         A fresh AsyncEngine. The caller owns its lifecycle.
     """
     settings = get_settings()
+    connect_args: dict[str, Any] = {
+        "command_timeout": settings.db_command_timeout_seconds,
+        "server_settings": {"application_name": settings.app_name},
+    }
+    # Honour sslmode from DATABASE_URL: without it asyncpg only *prefers* TLS
+    # and will talk to the database in plaintext if negotiation fails.
+    if url is None and settings.database_ssl_mode:
+        connect_args["ssl"] = settings.database_ssl_mode
     return create_async_engine(
         url or settings.database_url,
         echo=settings.debug and not settings.is_production,
@@ -63,10 +72,7 @@ def create_engine(url: str | None = None) -> AsyncEngine:
         max_overflow=settings.db_max_overflow,
         pool_pre_ping=True,
         pool_recycle=settings.db_pool_recycle_seconds,
-        connect_args={
-            "command_timeout": settings.db_command_timeout_seconds,
-            "server_settings": {"application_name": settings.app_name},
-        },
+        connect_args=connect_args,
     )
 
 

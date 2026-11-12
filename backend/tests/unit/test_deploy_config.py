@@ -188,3 +188,18 @@ def test_retired_groq_model_maps_to_its_replacement() -> None:
 def test_current_model_name_is_left_alone() -> None:
     s = Settings(openai_model="qwen2.5:3b")  # type: ignore[call-arg]
     assert s.openai_model == "qwen2.5:3b"
+
+
+@pytest.mark.parametrize(
+    ("url", "expected"),
+    [
+        ("postgresql://u:p@ep.neon.tech/db?sslmode=require", "require"),
+        ("postgresql://u:p@ep.neon.tech/db?sslmode=verify-full&x=1", "verify-full"),
+        ("postgresql://u:p@ep.neon.tech/db", None),
+        ("postgresql://u:p@ep.neon.tech/db?sslmode=disable", None),
+        ("", None),
+    ],
+)
+def test_sslmode_in_database_url_reaches_the_driver(url: str, expected: str | None) -> None:
+    # The async DSN drops libpq query parameters; the TLS requirement must not go with them.
+    assert Settings(DATABASE_URL=url).database_ssl_mode == expected  # type: ignore[call-arg]

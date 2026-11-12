@@ -128,6 +128,21 @@ class Settings(BaseSettings):
             f"@{self.postgres_host}:{self.postgres_port}/{self.postgres_db}"
         )
 
+    @property
+    def database_ssl_mode(self) -> str | None:
+        """TLS mode requested in DATABASE_URL (``sslmode=...``), if any.
+
+        The async DSN cannot carry libpq query parameters, so the mode is
+        handed to the driver separately. Dropping it silently left the driver
+        on its default, which tries TLS but falls back to plaintext.
+        """
+        if "?" not in self.database_url_override:
+            return None
+        from urllib.parse import parse_qs
+
+        mode = parse_qs(self.database_url_override.split("?", 1)[1]).get("sslmode", [None])[0]
+        return mode if mode in {"require", "verify-ca", "verify-full"} else None
+
     @computed_field  # type: ignore[prop-decorator]
     @property
     def database_url_sync(self) -> str:
