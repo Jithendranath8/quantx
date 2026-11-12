@@ -68,6 +68,7 @@ async def run_walk_forward(
 
     if register and result.total_windows > 0:
         await ExperimentRegistryService(db).register_from_dataset(
+            user_id=user.id,
             strategy_name=strategy_name,
             df=df,
             symbol=symbol,
@@ -126,6 +127,7 @@ async def run_optimization(
         # Recording the dataset fingerprint alongside the winning parameters is
         # what makes the result reproducible later.
         await ExperimentRegistryService(db).register_from_dataset(
+            user_id=user.id,
             strategy_name=strategy_name,
             df=df,
             symbol=symbol,
@@ -221,7 +223,10 @@ async def list_experiments(
     offset: int = Query(0, ge=0),
 ) -> list[dict[str, Any]]:
     """Fetch a page of registered experiments."""
-    records = await ExperimentRegistryService(db).list_experiments(limit=limit, offset=offset)
+    # Each user sees their own research; an operator sees all of it.
+    records = await ExperimentRegistryService(db).list_experiments(
+        limit=limit, offset=offset, user_id=None if user.is_superuser else user.id
+    )
     return [
         {
             "experiment_id": r.experiment_id,
