@@ -65,7 +65,12 @@ async def _prune_expired_data() -> dict[str, int]:
             while True:
                 ids = (
                     await session.execute(
-                        select(model.id).where(column < cutoff)  # type: ignore[attr-defined]  # retention models declare id.limit(DELETE_CHUNK_SIZE)
+                        # The limit is what makes this a chunked delete. It had
+                        # slid into a trailing comment, so each pass selected
+                        # every expired id and deleted them in one statement.
+                        select(model.id)  # type: ignore[attr-defined]  # retention models declare id
+                        .where(column < cutoff)
+                        .limit(DELETE_CHUNK_SIZE)
                     )
                 ).scalars().all()
                 if not ids:
