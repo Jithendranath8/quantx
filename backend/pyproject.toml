@@ -43,7 +43,7 @@ dependencies = [
 
     # Binance
     "python-binance>=1.0.22",
-    "websockets>=14.0",
+    "websockets>=17.4",
 
     # LLM providers for the agentic runtime
     "openai>=1.58.0",

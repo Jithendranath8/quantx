@@ -31,7 +31,7 @@ email-validator>=2.2.0
 httpx>=0.28.0
 
 # Binance (REST via httpx in app.connectors; python-binance is not used)
-websockets>=14.0
+websockets>=17.4
 
 # LLM providers for the agentic runtime (OpenAI-compatible + Anthropic native tool use)
 openai>=1.58.0
