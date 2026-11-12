@@ -13,7 +13,10 @@ greenlet>=3.1.0
 redis[hiredis]>=5.2.0
 
 # Auth
-python-jose[cryptography]>=3.3.0
+# PyJWT replaced python-jose: python-jose has no release fixing its algorithm
+# confusion advisory, and it pulls in ecdsa, which has an unfixed timing
+# advisory of its own. The app only ever needed HS256.
+PyJWT>=2.10.1
 # passlib was removed: its last release (1.7.4, 2020) reads bcrypt.__about__,
 # which bcrypt 4.1 deleted, so passlib + bcrypt>=4.1 fails at hash time.
 # app.core.security calls bcrypt directly instead.

@@ -15,15 +15,17 @@ written by the previous passlib configuration still verify.
 
 import uuid
 from datetime import UTC, datetime, timedelta
-from typing import Any, cast
+from typing import Any
 
 import bcrypt
-from jose import JWTError, jwt
+import jwt
 
 from app.core.config import get_settings
 from app.core.exceptions import TokenExpiredError, TokenInvalidError, ValidationError
 
 settings = get_settings()
+
+_CLOCK_SKEW_LEEWAY = timedelta(seconds=5)
 
 # ── Password Hashing ─────────────────────────────────────────────────
 
@@ -156,21 +158,21 @@ def decode_token(token: str) -> dict[str, Any]:
         TokenInvalidError: If the token is malformed or invalid.
     """
     try:
-        return cast(
-            "dict[str, Any]",
-            jwt.decode(
-                token,
-                settings.jwt_secret_key,
-                algorithms=[settings.jwt_algorithm],
-                # A correctly signed token with no expiry would otherwise be
-                # accepted forever.
-                options={"require_exp": True, "require_iat": True, "require_sub": True},
-            ),
+        payload: dict[str, Any] = jwt.decode(
+            token,
+            settings.jwt_secret_key,
+            # Pinned: the token's own header never chooses the algorithm.
+            algorithms=[settings.jwt_algorithm],
+            # A correctly signed token with no expiry would otherwise be
+            # accepted forever.
+            options={"require": ["exp", "iat", "sub"]},
+            # Tolerates a few seconds of clock difference between hosts.
+            leeway=_CLOCK_SKEW_LEEWAY,
         )
-    except JWTError as e:
-        error_msg = str(e).lower()
-        if "expired" in error_msg:
-            raise TokenExpiredError() from e
+        return payload
+    except jwt.ExpiredSignatureError as e:
+        raise TokenExpiredError() from e
+    except jwt.PyJWTError as e:
         raise TokenInvalidError() from e
 
 
