@@ -176,6 +176,18 @@ async def superuser(db_session: AsyncSession) -> User:
     return user
 
 
+@pytest_asyncio.fixture
+async def live_trader(db_session: AsyncSession, test_user: User) -> User:
+    """The test user, granted permission to place live orders.
+
+    Nothing in the API grants this; the operator does, out of band. Tests that
+    exercise order placement opt in explicitly so the default stays "cannot".
+    """
+    test_user.can_trade_live = True
+    await db_session.commit()
+    return test_user
+
+
 @pytest.fixture
 def auth_headers(test_user: User) -> dict[str, str]:
     """Bearer headers for the test user."""

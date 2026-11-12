@@ -11,12 +11,17 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, Query
 
-from app.core.dependencies import CurrentUser, DBSession, RateLimiter
+from app.core.dependencies import CurrentUser, DBSession, LiveTrader, RateLimiter
 from app.schemas.live_trading import LiveOrderRequest, LiveOrderResponse
 from app.services.kill_switch import KillSwitchService
 from app.services.live_trading_service import LiveTradingService
 
 router = APIRouter(prefix="/live", tags=["Live Trading Engine"])
+
+# The reason is free text that ends up in logs, the event ledger and operator
+# alerts. Printable characters only: no control bytes that could forge a log
+# line or drive a terminal.
+_REASON_PATTERN = r"^[^\x00-\x1f\x7f]*$"
 
 
 @router.post(
@@ -28,12 +33,14 @@ router = APIRouter(prefix="/live", tags=["Live Trading Engine"])
 )
 async def execute_order(
     req: LiveOrderRequest,
-    user: CurrentUser,
+    user: LiveTrader,
     db: DBSession,
 ) -> LiveOrderResponse:
     """Place a live order after mandatory risk-engine validation.
 
-    Mainnet execution additionally requires ALLOW_MAINNET_TRADING=true.
+    Requires the live-trading permission, which only the operator can grant:
+    every account trades the operator's single exchange account, and sign-up is
+    open. Mainnet execution additionally requires ALLOW_MAINNET_TRADING=true.
     """
     return await LiveTradingService(db).execute_live_order(user_id=user.id, req=req)
 
@@ -74,6 +81,7 @@ async def list_orders(
 @router.delete(
     "/orders/{order_id}",
     summary="Cancel one of your live orders",
+    dependencies=[Depends(RateLimiter("live_cancel", max_requests=60))],
 )
 async def cancel_order(
     order_id: uuid.UUID,
@@ -93,7 +101,7 @@ async def cancel_order(
 async def trigger_kill_switch(
     user: CurrentUser,
     db: DBSession,
-    reason: str = Query("EMERGENCY_USER_ACTIVATED", max_length=255),
+    reason: str = Query("EMERGENCY_USER_ACTIVATED", max_length=255, pattern=_REASON_PATTERN),
 ) -> dict[str, Any]:
     """Halt trading, cancel open orders, and verify the cancellations.
 
@@ -106,11 +114,12 @@ async def trigger_kill_switch(
 @router.post(
     "/kill-switch/deactivate",
     summary="Release the kill switch and resume trading",
+    dependencies=[Depends(RateLimiter("kill_switch_release", max_requests=10))],
 )
 async def deactivate_kill_switch(
     user: CurrentUser,
     db: DBSession,
-    reason: str = Query("MANUAL_RESET", max_length=255),
+    reason: str = Query("MANUAL_RESET", max_length=255, pattern=_REASON_PATTERN),
 ) -> dict[str, Any]:
     """Clear the persisted circuit breaker for this user."""
     return await KillSwitchService(db).deactivate_kill_switch(user_id=user.id, reason=reason)
