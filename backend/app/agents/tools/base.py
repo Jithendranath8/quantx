@@ -62,6 +62,8 @@ class ToolContext:
     account_balance: float = 100_000.0
     # Hard gate: mutating tools refuse to run unless this is explicitly True.
     allow_mutations: bool = False
+    # Second gate, for the few tools that act on the exchange itself.
+    allow_exchange_actions: bool = False
     # Free-form scratch space for an orchestration run (e.g. cached context).
     scratch: dict[str, Any] = field(default_factory=dict)
 
@@ -118,6 +120,10 @@ class Tool[ArgsT: BaseModel](ABC):
     args_model: type[ArgsT]
     #: True when the tool can change persistent or exchange state.
     mutating: ClassVar[bool] = False
+    #: True when the tool sends signed requests to the exchange. These need
+    #: their own permission on top of ``allow_mutations``: "may place paper
+    #: orders" must not silently also mean "may cancel real exchange orders".
+    exchange_action: ClassVar[bool] = False
 
     def json_schema(self) -> dict[str, Any]:
         """JSON Schema for this tool's arguments (provider-neutral)."""
@@ -136,6 +142,13 @@ class Tool[ArgsT: BaseModel](ABC):
             return self._err(
                 "This tool mutates state and is disabled in the current (read-only) "
                 "agent mode. No order or state change was attempted.",
+                started,
+            )
+
+        if self.exchange_action and not ctx.allow_exchange_actions:
+            return self._err(
+                "This tool acts on the exchange and is not enabled for this agent. "
+                "Nothing was halted or cancelled.",
                 started,
             )
 

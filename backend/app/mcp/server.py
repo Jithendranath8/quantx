@@ -10,7 +10,9 @@ Identity and permissions are bound from the environment at start-up, never from
 the client:
 
   QUANTX_MCP_USER_ID           bind calls to this user (UUID) for user-scoped tools
-  QUANTX_MCP_ALLOW_MUTATIONS   "true" to permit paper-order / kill-switch tools
+  QUANTX_MCP_ALLOW_MUTATIONS   "true" to permit state-changing tools (paper orders)
+  QUANTX_MCP_ALLOW_KILL_SWITCH "true" (with the above) to permit the kill switch,
+                               which cancels real exchange orders
   QUANTX_MCP_ACCOUNT_BALANCE   balance assumed for risk sizing (default 100000)
 
 Run it (after `pip install -e '.[mcp]'`):
@@ -56,7 +58,17 @@ async def _context_factory() -> tuple[ToolContext, Callable[[], Awaitable[None]]
         try:
             user_id = uuid.UUID(raw_user)
         except ValueError:
-            logger.warning("mcp_invalid_user_id", value=raw_user)
+            logger.warning("mcp_invalid_user_id")
+    if user_id is not None:
+        # The id comes from the environment, not from a login, so check it
+        # names a real, active account before acting on its behalf.
+        from app.models.user import User
+
+        user = await session.get(User, user_id)
+        await session.rollback()
+        if user is None or not user.is_active:
+            logger.warning("mcp_user_unavailable")
+            user_id = None
 
     balance = float(os.getenv("QUANTX_MCP_ACCOUNT_BALANCE", "100000") or 100000)
     ctx = ToolContext(
@@ -65,6 +77,9 @@ async def _context_factory() -> tuple[ToolContext, Callable[[], Awaitable[None]]
         client=get_binance_client(),
         account_balance=balance,
         allow_mutations=_env_flag("QUANTX_MCP_ALLOW_MUTATIONS"),
+        # The kill switch sends signed cancels to the exchange. It has its own
+        # switch so that enabling paper orders does not also enable that.
+        allow_exchange_actions=_env_flag("QUANTX_MCP_ALLOW_KILL_SWITCH"),
     )
 
     async def _close() -> None:

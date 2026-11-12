@@ -133,7 +133,7 @@ class QuantXOrchestrator:
                 "log": [*state.log, f"{spec.key}: {report.tool_calls} tool call(s)"],
             }
             if spec.key == RISK_OFFICER.key:
-                updates["halted"] = report.data.get("halted", False)
+                updates["halted"] = report.data.get("halted", True)
             return updates
 
         return _node
@@ -149,8 +149,14 @@ class QuantXOrchestrator:
         data: dict[str, Any] = {}
         if spec.key == RISK_OFFICER.key:
             risk_state = await self._registry.invoke("get_risk_state", {}, self._ctx)
-            if risk_state.ok and isinstance(risk_state.data, dict):
-                data["halted"] = bool(risk_state.data.get("halted", False))
+            # Fail closed: if the halt state cannot be read, behave as halted.
+            # Defaulting to "not halted" on an error let the run carry on to
+            # the execution step exactly when the risk engine was unreachable.
+            data["halted"] = (
+                bool(risk_state.data.get("halted", True))
+                if risk_state.ok and isinstance(risk_state.data, dict)
+                else True
+            )
         return SpecialistReport(
             agent=spec.key,
             summary=result.final_text,
