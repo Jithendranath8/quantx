@@ -49,16 +49,38 @@ api.interceptors.request.use((config) => {
 // and revokes on every use).
 let refreshInFlight: Promise<string> | null = null;
 
-async function refreshAccessToken(): Promise<string> {
-  const refreshToken = getRefreshToken();
-  if (!refreshToken) throw new Error('No refresh token available');
+// A refresh token can be redeemed exactly once; presenting it a second time is
+// treated by the server as theft and signs the user out everywhere. Tabs share
+// one token pair in localStorage, so two tabs refreshing at the same moment
+// would do exactly that to each other. The Web Locks API serialises the refresh
+// across tabs, and the tab that waited reuses the pair the first one stored.
+const REFRESH_LOCK = 'quantx-token-refresh';
 
-  // Bare axios, not `api`: this request must not run the interceptors below.
-  const response = await axios.post<Tokens>(`${API_BASE_URL}/auth/refresh`, {
-    refresh_token: refreshToken,
-  });
-  storeTokens(response.data);
-  return response.data.access_token;
+async function refreshAccessToken(staleAccessToken: string | null): Promise<string> {
+  const rotate = async (): Promise<string> => {
+    const current = getAccessToken();
+    if (current && current !== staleAccessToken) return current; // another tab already refreshed
+
+    const refreshToken = getRefreshToken();
+    if (!refreshToken) throw new Error('No refresh token available');
+
+    // Bare axios, not `api`: this request must not run the interceptors below.
+    const response = await axios.post<Tokens>(`${API_BASE_URL}/auth/refresh`, {
+      refresh_token: refreshToken,
+    });
+    storeTokens(response.data);
+    return response.data.access_token;
+  };
+
+  if (typeof navigator !== 'undefined' && navigator.locks?.request) {
+    return navigator.locks.request(REFRESH_LOCK, rotate);
+  }
+  return rotate();
+}
+
+function bearerOf(config: AxiosRequestConfig | undefined): string | null {
+  const header = (config?.headers as Record<string, unknown> | undefined)?.Authorization;
+  return typeof header === 'string' && header.startsWith('Bearer ') ? header.slice(7) : null;
 }
 
 interface RetriableConfig extends AxiosRequestConfig {
@@ -77,7 +99,7 @@ api.interceptors.response.use(
     if (error.response?.status === 401 && original && !original._retried && !isAuthCall) {
       original._retried = true;
       try {
-        refreshInFlight = refreshInFlight ?? refreshAccessToken();
+        refreshInFlight = refreshInFlight ?? refreshAccessToken(bearerOf(original));
         const token = await refreshInFlight;
         refreshInFlight = null;
         original.headers = { ...original.headers, Authorization: `Bearer ${token}` };
