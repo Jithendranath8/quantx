@@ -1,0 +1,10 @@
+# Keep secrets, dependencies and build output out of the build context.
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+.git
+node_modules/
+dist/
+*.tsbuildinfo

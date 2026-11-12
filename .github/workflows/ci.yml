@@ -6,6 +6,10 @@ on:
   pull_request:
     branches: [ main, develop ]
 
+# Least privilege: these jobs only read the repository.
+permissions:
+  contents: read
+
 # Nothing in this workflow is allowed to swallow a failure. Every step that
 # previously ended in `|| true` now fails the build, which is the only reason
 # a pipeline is worth running.
@@ -137,3 +141,50 @@ jobs:
 
       - name: Build frontend image
         run: docker build --target production -t quantx-frontend:ci ./frontend
+
+  # Security gates. These fail the build on a known-vulnerable dependency, a
+  # committed secret, or a dangerous construct, so a regression is caught in
+  # review instead of in an audit.
+  security:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Static security lint (backend)
+        # Dangerous constructs: shell and SQL built from strings, eval/exec,
+        # pickle, weak hashes, TLS verification off, requests without timeouts.
+        # The ignored rules are false positives for this codebase (placeholder
+        # constants, the bind address, pytest asserts).
+        run: |
+          pip install ruff
+          ruff check backend/app --select S --ignore S101,S104,S105,S106,S110,S311,S607
+
+      - name: Known vulnerabilities in backend dependencies
+        # Audits what actually gets installed. The requirements use version
+        # ranges, so auditing the file itself would mean resolving every range
+        # first, which is slow and unreliable.
+        run: |
+          pip install -r backend/requirements.txt
+          pip install pip-audit
+          pip-audit --progress-spinner off
+
+      - name: Known vulnerabilities in frontend dependencies
+        working-directory: frontend
+        run: npm audit --omit=dev --audit-level=high
+
+      - name: Committed secrets
+        run: |
+          docker run --rm -v "$PWD:/repo" zricethezav/gitleaks:v8.21.2 \
+            detect --source /repo --redact --no-banner

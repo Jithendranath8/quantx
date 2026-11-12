@@ -1,0 +1,22 @@
+# Keep secrets, caches and local state out of image layers. The Dockerfile
+# copies the whole build context, so anything not listed here ships.
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+.git
+.gitignore
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
+logs/
+ml_artifacts/
+mlruns/
+.venv/
+venv/

@@ -7,8 +7,8 @@ These tests run without database connectivity.
 
 from datetime import UTC, datetime, timedelta
 
+import jwt
 import pytest
-from jose import jwt
 
 from app.core.config import get_settings
 from app.core.exceptions import TokenExpiredError, TokenInvalidError

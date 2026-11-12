@@ -20,6 +20,8 @@ concurrency:
   group: scheduled-jobs
   cancel-in-progress: false
 
+permissions: {}
+
 jobs:
   frequent:
     if: github.event.schedule == '*/5 * * * *' || github.event_name == 'workflow_dispatch'
@@ -31,11 +33,25 @@ jobs:
           CRON_SECRET: ${{ secrets.CRON_SECRET }}
         run: |
           set -u
+          # The cron secret is sent to this URL, so it must be the real,
+          # TLS-protected deployment and nothing else.
+          case "$DEPLOY_URL" in
+            https://*) ;;
+            *) echo "DEPLOY_URL must start with https://" >&2; exit 1 ;;
+          esac
           for job in paper_fills reconcile market_sync; do
             echo "→ $job"
-            curl -fsS --max-time 60 -X POST \
+            # Only the status code is printed. Job responses can list other
+            # users' orders, and Actions logs are readable by every collaborator.
+            code=$(curl -sS --max-time 60 -o /dev/null -w '%{http_code}' -X POST \
               "$DEPLOY_URL/api/v1/internal/jobs/$job" \
-              -H "X-Cron-Secret: $CRON_SECRET" || echo "warn: $job failed (continuing)"
+              -H "X-Cron-Secret: $CRON_SECRET") || code="curl-error"
+            echo "  status: $code"
+            # A failed job does not stop the others, but it is flagged on the run.
+            case "$code" in
+              2*) ;;
+              *) echo "::warning::$job returned $code" ;;
+            esac
           done
 
   nightly:
@@ -48,9 +64,23 @@ jobs:
           CRON_SECRET: ${{ secrets.CRON_SECRET }}
         run: |
           set -u
+          # The cron secret is sent to this URL, so it must be the real,
+          # TLS-protected deployment and nothing else.
+          case "$DEPLOY_URL" in
+            https://*) ;;
+            *) echo "DEPLOY_URL must start with https://" >&2; exit 1 ;;
+          esac
           for job in settle_ai derivatives_snapshot prune cleanup_tokens; do
             echo "→ $job"
-            curl -fsS --max-time 120 -X POST \
+            # Only the status code is printed. Job responses can list other
+            # users' orders, and Actions logs are readable by every collaborator.
+            code=$(curl -sS --max-time 120 -o /dev/null -w '%{http_code}' -X POST \
               "$DEPLOY_URL/api/v1/internal/jobs/$job" \
-              -H "X-Cron-Secret: $CRON_SECRET" || echo "warn: $job failed (continuing)"
+              -H "X-Cron-Secret: $CRON_SECRET") || code="curl-error"
+            echo "  status: $code"
+            # A failed job does not stop the others, but it is flagged on the run.
+            case "$code" in
+              2*) ;;
+              *) echo "::warning::$job returned $code" ;;
+            esac
           done

@@ -11,9 +11,9 @@ import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+import jwt
 import pytest
 from httpx import AsyncClient
-from jose import jwt
 from pydantic import ValidationError as PydanticValidationError
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -493,7 +493,7 @@ class TestSessions:
 def test_legacy_tokens_without_a_session_still_work_until_they_expire() -> None:
     """Tokens issued before sessions were tracked carry no sid and simply age out."""
     token = create_access_token(subject=str(uuid.uuid4()))
-    claims = jwt.get_unverified_claims(token)
+    claims = jwt.decode(token, options={"verify_signature": False})
     assert "sid" not in claims
     assert datetime.fromtimestamp(claims["exp"], tz=UTC) - datetime.now(UTC) <= timedelta(
         minutes=get_settings().jwt_access_token_expire_minutes

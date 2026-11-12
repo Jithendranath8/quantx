@@ -78,7 +78,7 @@ function UserMenu() {
           </Link>
         </li>
         <li>
-          <Link to="/" className="flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-zinc-300 hover:bg-white/[0.05] hover:text-white">
+          <Link reloadDocument to="/" className="flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-zinc-300 hover:bg-white/[0.05] hover:text-white">
             <Home className="w-4 h-4" /> Home page
           </Link>
         </li>
