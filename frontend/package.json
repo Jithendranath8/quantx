@@ -14,7 +14,7 @@
     "@heroicons/react": "^2.2.0",
     "@splinetool/react-spline": "^4.0.0",
     "@splinetool/runtime": "^1.9.98",
-    "axios": "^1.7.9",
+    "axios": "^1.21.1",
     "clsx": "^2.1.1",
     "daisyui": "^4.12.24",
     "lightweight-charts": "^4.2.1",
