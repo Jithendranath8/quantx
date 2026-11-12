@@ -10,9 +10,10 @@ access is a direct route to an IP ban.
 
 from typing import Any
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select
 
+from app.api.params import SymbolQuery, TimeframeQuery
 from app.connectors.binance_client import get_binance_client
 from app.core.config import get_settings
 from app.core.dependencies import CurrentUser, DBSession, RateLimiter
@@ -89,13 +90,9 @@ async def sync_market_data(
 )
 async def get_ticker(
     user: CurrentUser,
-    symbol: str = Query(
-        ...,
-        min_length=3,
-        max_length=20,
-        description="Symbol e.g. BTCUSDT. Required: the all-symbols form carries "
-        "very high request weight against the exchange rate limit.",
-    ),
+    # Required: the all-symbols form carries very high request weight against
+    # the exchange rate limit.
+    symbol: SymbolQuery,
 ) -> dict[str, Any] | list[dict[str, Any]]:
     """Fetch 24h ticker statistics for one symbol."""
     return await get_binance_client().get_ticker_24h(symbol=symbol)
@@ -108,7 +105,7 @@ async def get_ticker(
 )
 async def get_price(
     user: CurrentUser,
-    symbol: str = Query("BTCUSDT", min_length=3, max_length=20),
+    symbol: SymbolQuery = "BTCUSDT",
 ) -> dict[str, Any]:
     """Fetch the last traded price."""
     return {"symbol": symbol.upper(), "price": await get_binance_client().get_price(symbol)}
@@ -121,7 +118,7 @@ async def get_price(
 )
 async def get_orderbook(
     user: CurrentUser,
-    symbol: str = Query("BTCUSDT", min_length=3, max_length=20),
+    symbol: SymbolQuery = "BTCUSDT",
     limit: int = Query(100, ge=5, le=1000),
 ) -> dict[str, Any]:
     """Fetch live orderbook depth for a symbol."""
@@ -136,7 +133,7 @@ async def get_orderbook(
 )
 async def get_microstructure(
     user: CurrentUser,
-    symbol: str = Query("BTCUSDT", min_length=3, max_length=20),
+    symbol: SymbolQuery = "BTCUSDT",
     levels: int = Query(10, ge=1, le=100, description="Top levels summed for imbalance"),
     depth_bps: float = Query(25.0, gt=0, le=1000, description="Depth half-window, bps of mid"),
 ) -> MicrostructureResponse:
@@ -169,14 +166,15 @@ async def get_microstructure(
     "/klines",
     response_model=list[CandleSchema],
     summary="Get historical candles from the database",
+    dependencies=[Depends(RateLimiter("market_klines", max_requests=240))],
 )
 async def get_klines(
     user: CurrentUser,
     db: DBSession,
-    symbol: str = Query("BTCUSDT", min_length=3, max_length=20),
-    timeframe: str = Query("1m"),
+    symbol: SymbolQuery = "BTCUSDT",
+    timeframe: TimeframeQuery = "1m",
     limit: int = Query(500, ge=1, le=1000),
-    offset: int = Query(0, ge=0, description="Skip N most recent candles, for paging back"),
+    offset: int = Query(0, ge=0, le=1_000_000, description="Skip N most recent candles, for paging back"),
 ) -> list[CandleSchema]:
     """Query stored candles, returned oldest-first for chart rendering."""
     stmt = (
@@ -199,7 +197,19 @@ async def download_history(
     data: DownloadHistoryRequest,
     user: CurrentUser,
 ) -> dict[str, str]:
-    """Queue a background task to backfill historical OHLCV data."""
+    """Queue a background task to backfill historical OHLCV data.
+
+    Only markets the platform is configured to cover can be downloaded. The
+    candles table is shared by every user, and each download spends the
+    operator's exchange request budget, so an arbitrary symbol or interval is
+    refused instead of being fetched and stored.
+    """
+    settings = get_settings()
+    if data.symbol not in settings.market_symbol_list or data.timeframe not in settings.market_timeframe_list:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="That symbol or timeframe is not one this platform covers.",
+        )
     task = download_historical_klines.delay(
         symbol=data.symbol,
         timeframe=data.timeframe,

@@ -9,16 +9,20 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from app.schemas.validators import Symbol, Timeframe
+
 
 class BacktestRequest(BaseModel):
     """Parameters for running a backtest simulation."""
 
-    symbol: str = Field(default="BTCUSDT")
-    timeframe: str = Field(default="1h")
-    strategy_name: str = Field(default="ema_crossover")
-    initial_capital: float = Field(default=10000.0, ge=100.0)
-    fee_rate: float = Field(default=0.00075, description="Maker/Taker fee (0.00075 = 0.075%)")
-    slippage: float = Field(default=0.0005, description="Slippage model (0.0005 = 0.05%)")
+    symbol: Symbol = Field(default="BTCUSDT")
+    timeframe: Timeframe = Field(default="1h")
+    strategy_name: str = Field(default="ema_crossover", pattern=r"^[a-z0-9_]{1,64}$")
+    initial_capital: float = Field(default=10000.0, ge=100.0, le=1e12, allow_inf_nan=False)
+    # Costs are fractions of notional. Bounded so a negative or absurd value
+    # cannot turn the simulator into a money printer or overflow its arithmetic.
+    fee_rate: float = Field(default=0.00075, ge=0.0, le=0.1, description="Maker/Taker fee (0.00075 = 0.075%)")
+    slippage: float = Field(default=0.0005, ge=0.0, le=0.1, description="Slippage model (0.0005 = 0.05%)")
     start_date: datetime | None = None
     end_date: datetime | None = None
 

@@ -6,6 +6,7 @@ List registered strategies and evaluate one against stored market data.
 
 from fastapi import APIRouter, Depends, Query
 
+from app.api.params import StrategyNameQuery, SymbolQuery, TimeframeQuery
 from app.core.dependencies import CurrentUser, DBSession, RateLimiter
 from app.engines.strategy.base import Signal
 from app.services.strategy_service import StrategyService
@@ -31,9 +32,9 @@ async def list_strategies(user: CurrentUser, db: DBSession) -> list[dict[str, st
 async def evaluate_strategy(
     user: CurrentUser,
     db: DBSession,
-    strategy_name: str = Query("ema_crossover"),
-    symbol: str = Query("BTCUSDT"),
-    timeframe: str = Query("1h"),
+    strategy_name: StrategyNameQuery = "ema_crossover",
+    symbol: SymbolQuery = "BTCUSDT",
+    timeframe: TimeframeQuery = "1h",
     limit: int = Query(200, ge=20, le=1000),
 ) -> Signal:
     """Run one strategy over recent candles and return its signal."""
