@@ -42,7 +42,7 @@ dependencies = [
     "httpx>=0.28.0",
 
     # Binance
-    "python-binance>=1.0.22",
+    "python-binance>=1.0.37",
     "websockets>=14.0",
 
     # LLM providers for the agentic runtime
