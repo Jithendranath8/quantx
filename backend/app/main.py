@@ -70,8 +70,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     setup_logging()
     logger.info("application_starting", app_name=settings.app_name, env=settings.app_env)
 
-    # Refuse to run production on development defaults.
+    # Refuse to run on the published default secrets, in any environment.
     settings.validate_production_safety()
+    for warning in settings.production_warnings():
+        logger.warning("insecure_production_setting", detail=warning)
 
     if settings.mainnet_trading_enabled:
         logger.warning(
@@ -151,8 +153,11 @@ def _verify_metrics_access(
     """
     if not settings.metrics_require_auth:
         return
+    expected = settings.metrics_password or settings.secret_key
+    # Compared as bytes: compare_digest raises on non-ASCII str, which turned a
+    # wrong password into a 500 instead of a 401.
     if credentials is None or not secrets.compare_digest(
-        credentials.password, settings.secret_key
+        credentials.password.encode("utf-8"), expected.encode("utf-8")
     ):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

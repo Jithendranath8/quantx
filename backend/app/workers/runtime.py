@@ -15,7 +15,7 @@ import asyncio
 from collections.abc import Coroutine
 from typing import Any
 
-from celery.signals import worker_process_init, worker_process_shutdown
+from celery.signals import worker_init, worker_process_init, worker_process_shutdown
 
 from app.core.database import dispose_engine
 from app.core.logging import get_logger
@@ -38,6 +38,19 @@ def get_loop() -> asyncio.AbstractEventLoop:
 def run_async[T](coro: Coroutine[Any, Any, T]) -> T:
     """Run a coroutine on the worker's persistent loop and return its result."""
     return get_loop().run_until_complete(coro)
+
+
+@worker_init.connect
+def _refuse_insecure_configuration(**_kwargs: Any) -> None:
+    """Run the API's startup safety check in the worker too.
+
+    The check used to run only in the web process, so a worker (which signs
+    nothing but does hold the exchange and database credentials) could start
+    on a configuration the API itself would refuse.
+    """
+    from app.core.config import get_settings
+
+    get_settings().validate_production_safety()
 
 
 @worker_process_init.connect

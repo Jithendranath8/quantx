@@ -66,6 +66,13 @@ class Settings(BaseSettings):
     debug: bool = False
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO"
     secret_key: str = Field(default=DEFAULT_SECRET_KEY, min_length=16)
+    # Local development only: permits starting on the published default
+    # secrets. Ignored (and refused) outside APP_ENV=development.
+    allow_insecure_dev_defaults: bool = False
+    # Proxy addresses uvicorn trusts for X-Forwarded-For. Read here only so the
+    # startup check can warn when it was left at the default behind a proxy;
+    # uvicorn itself consumes the same environment variable.
+    forwarded_allow_ips: str = "127.0.0.1"
 
     # ── Backend Server ───────────────────────────────────────────────────
     backend_host: str = "0.0.0.0"
@@ -336,6 +343,10 @@ class Settings(BaseSettings):
     # ── Monitoring ───────────────────────────────────────────────────────
     prometheus_enabled: bool = True
     metrics_require_auth: bool = True
+    # Password the metrics scraper presents. Falls back to SECRET_KEY when
+    # unset; set it so the application's signing key does not have to be
+    # copied into the monitoring stack.
+    metrics_password: str = ""
 
     # ── Market Data ──────────────────────────────────────────────────────
     # Single source of truth for which markets the platform covers. This drives
@@ -413,32 +424,35 @@ class Settings(BaseSettings):
         return self.app_env == "production"
 
     def validate_production_safety(self) -> None:
-        """Fail fast when a deployed service is running with insecure defaults.
+        """Fail fast when the service would run on insecure defaults.
 
-        The token-signing secrets are checked on EVERY non-development
-        environment, not only production: a deployment that forgets to set
-        APP_ENV must still never sign JWTs (or guard /metrics) with the key
-        published as the default in this repo. The remaining checks (debug,
-        datastore passwords) are production-only.
+        The signing secrets are checked in EVERY environment. The defaults are
+        published in this repository, so anyone can forge a valid token for a
+        service that runs on them. They used to be checked only when APP_ENV
+        was not "development", and "development" is what APP_ENV is when
+        nobody sets it: a deployment that forgot the variable started
+        normally and accepted forged tokens. An unset APP_ENV now fails
+        closed. Running on the defaults takes a deliberate, named opt-in
+        (ALLOW_INSECURE_DEV_DEFAULTS=true) that is honoured only in
+        development and must never appear in a deployed environment.
+
+        The remaining checks (debug, datastore passwords) are production-only.
 
         Raises:
             RuntimeError: If any insecure default is still in place.
         """
-        # Local development may run on the shipped defaults; nothing reachable may.
-        if self.app_env == "development":
-            return
-
         problems: list[str] = []
 
-        # A default or shared signing secret lets anyone forge a valid token for
-        # any known user id — this is the highest-impact misconfiguration, so it
-        # is enforced regardless of which non-dev env this is.
-        if self.secret_key == DEFAULT_SECRET_KEY:
-            problems.append("SECRET_KEY is still the default value")
-        if self.jwt_secret_key == DEFAULT_JWT_SECRET_KEY:
-            problems.append("JWT_SECRET_KEY is still the default value")
-        if self.jwt_secret_key == self.secret_key:
-            problems.append("JWT_SECRET_KEY must differ from SECRET_KEY")
+        dev_opt_in = self.app_env == "development" and self.allow_insecure_dev_defaults
+        if not dev_opt_in:
+            if self.secret_key == DEFAULT_SECRET_KEY:
+                problems.append("SECRET_KEY is still the default value")
+            if self.jwt_secret_key == DEFAULT_JWT_SECRET_KEY:
+                problems.append("JWT_SECRET_KEY is still the default value")
+            if self.jwt_secret_key == self.secret_key:
+                problems.append("JWT_SECRET_KEY must differ from SECRET_KEY")
+        if self.allow_insecure_dev_defaults and self.app_env != "development":
+            problems.append("ALLOW_INSECURE_DEV_DEFAULTS is set outside development")
 
         if self.is_production:
             # The component password is only used when there is no DATABASE_URL /
@@ -453,9 +467,44 @@ class Settings(BaseSettings):
                 problems.append("REDIS_PASSWORD is empty (or set REDIS_URL)")
 
         if problems:
-            raise RuntimeError(
-                "Refusing to start with insecure configuration: " + "; ".join(problems)
+            hint = (
+                " For local development only, generate secrets (see .env.example) "
+                "or set ALLOW_INSECURE_DEV_DEFAULTS=true."
+                if self.app_env == "development"
+                else ""
             )
+            raise RuntimeError(
+                "Refusing to start with insecure configuration: " + "; ".join(problems) + "." + hint
+            )
+
+    def production_warnings(self) -> list[str]:
+        """Settings that weaken a production deployment without being fatal.
+
+        Logged at startup instead of refusing to boot: each can be a deliberate
+        choice, but none should be a surprise.
+        """
+        if not self.is_production:
+            return []
+        warnings: list[str] = []
+        if not self.metrics_require_auth and self.prometheus_enabled:
+            warnings.append("METRICS_REQUIRE_AUTH is false: /metrics is readable without credentials")
+        if not self.rate_limit_enabled:
+            warnings.append("RATE_LIMIT_ENABLED is false: no request throttling, including on login")
+        if any("localhost" in o or "127.0.0.1" in o or o == "*" for o in self.allowed_origins_list):
+            warnings.append("ALLOWED_ORIGINS includes a local or wildcard origin")
+        for name, value in (("FRONTEND_URL", self.frontend_url), ("PUBLIC_API_URL", self.public_api_url)):
+            if not value.startswith("https://"):
+                warnings.append(f"{name} is not an https URL")
+        if min(len(self.secret_key), len(self.jwt_secret_key)) < 32:
+            warnings.append("SECRET_KEY or JWT_SECRET_KEY is shorter than 32 characters")
+        if self.forwarded_allow_ips.strip() in {"", "127.0.0.1"}:
+            warnings.append(
+                "FORWARDED_ALLOW_IPS is the default: behind a reverse proxy every client appears to come "
+                "from the proxy, so unauthenticated rate limits (login, register) are shared by all clients"
+            )
+        if self.mainnet_trading_enabled:
+            warnings.append("Mainnet trading is ENABLED: accounts granted live trading move real funds")
+        return warnings
 
 
 @lru_cache(maxsize=1)

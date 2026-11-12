@@ -27,6 +27,7 @@ from typing import TYPE_CHECKING, Any
 
 from app.agents.tools import build_default_registry
 from app.agents.tools.base import ToolContext
+from app.core.config import get_settings
 from app.core.logging import get_logger
 from app.mcp.handlers import handle_call, list_tool_specs
 
@@ -100,6 +101,8 @@ async def main() -> None:  # pragma: no cover - integration entrypoint
     """Run the server over stdio."""
     from mcp.server.stdio import stdio_server
 
+    # The same startup check the API runs: never operate on published secrets.
+    get_settings().validate_production_safety()
     server = build_server()
     logger.info("mcp_server_starting", name=SERVER_NAME, mutations=_env_flag("QUANTX_MCP_ALLOW_MUTATIONS"))
     async with stdio_server() as (read_stream, write_stream):
