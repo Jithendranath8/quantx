@@ -8,6 +8,11 @@ import {
 import type { LucideIcon } from 'lucide-react';
 import { Link } from 'react-router-dom';
 
+// Every <Link> on this page uses `reloadDocument`. This document is served with
+// a looser Content-Security-Policy than the app (the 3D scene needs
+// 'unsafe-eval'), so entering the app must be a real page load that picks up
+// the strict policy, not a client-side route change inside this document.
+
 import DecisionFlow from '../components/brand/DecisionFlow';
 import { Logo } from '../components/brand/Logo';
 import SplineScene from '../components/fx/SplineScene';
@@ -55,11 +60,11 @@ function SiteNav() {
         </ul>
         <div className="ml-auto flex items-center gap-2">
           {!isAuthenticated && (
-            <Link to="/login" className="hidden sm:inline-flex h-9 items-center rounded-full px-4 text-sm text-zinc-300 hover:text-white cursor-pointer">
+            <Link reloadDocument to="/login" className="hidden sm:inline-flex h-9 items-center rounded-full px-4 text-sm text-zinc-300 hover:text-white cursor-pointer">
               Sign in
             </Link>
           )}
-          <Link
+          <Link reloadDocument
             to={isAuthenticated ? appPath('') : '/login?mode=register'}
             className="inline-flex h-9 items-center gap-1.5 rounded-full bg-white px-4 text-sm font-medium text-ink-950 hover:bg-zinc-200 transition cursor-pointer"
           >
@@ -131,7 +136,7 @@ function Hero() {
           </Reveal>
           <Reveal delay={0.5}>
             <div className="mt-9 flex flex-wrap items-center gap-4">
-              <Link to={isAuthenticated ? appPath('') : '/login?mode=register'} className="group cursor-pointer">
+              <Link reloadDocument to={isAuthenticated ? appPath('') : '/login?mode=register'} className="group cursor-pointer">
                 <MovingBorderButton>
                   {isAuthenticated ? 'Open the terminal' : 'Start researching — free'}
                   <ArrowRight className="w-4 h-4 transition-transform group-hover:translate-x-0.5" />
@@ -471,7 +476,7 @@ function FirstSession() {
         <ol className="mt-14 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           {FIRST_STEPS.map((s, i) => (
             <Reveal key={s.n} delay={i * 0.06}>
-              <Link
+              <Link reloadDocument
                 to={isAuthenticated ? appPath(s.path) : '/login?mode=register'}
                 className="group flex h-full flex-col rounded-3xl border border-white/[0.07] bg-ink-900/60 p-6 transition hover:border-brand-500/30 hover:bg-ink-850 cursor-pointer"
               >
@@ -549,13 +554,13 @@ function FinalCta() {
           Paper-first, fully audited, and honest about what it knows. Sign in with Google, GitHub or email.
         </p>
         <div className="mt-10 flex flex-wrap items-center justify-center gap-4">
-          <Link to={isAuthenticated ? appPath('') : '/login?mode=register'} className="group cursor-pointer">
+          <Link reloadDocument to={isAuthenticated ? appPath('') : '/login?mode=register'} className="group cursor-pointer">
             <MovingBorderButton>
               {isAuthenticated ? 'Open the terminal' : 'Create a free account'} <ArrowRight className="w-4 h-4" />
             </MovingBorderButton>
           </Link>
           {!isAuthenticated && (
-            <Link to="/login" className="text-sm text-zinc-400 hover:text-white cursor-pointer">
+            <Link reloadDocument to="/login" className="text-sm text-zinc-400 hover:text-white cursor-pointer">
               I already have an account
             </Link>
           )}
@@ -580,7 +585,7 @@ function Footer() {
             </li>
           ))}
           <li>
-            <Link to="/login" className="hover:text-white cursor-pointer">Sign in</Link>
+            <Link reloadDocument to="/login" className="hover:text-white cursor-pointer">Sign in</Link>
           </li>
         </ul>
       </div>

@@ -139,7 +139,7 @@ export default function LoginPage() {
       <div className="relative flex flex-col px-6 sm:px-12 py-8">
         <div className="flex items-center justify-between">
           <Logo />
-          <Link to="/" className="inline-flex items-center gap-1.5 text-xs text-zinc-500 hover:text-white transition cursor-pointer">
+          <Link reloadDocument to="/" className="inline-flex items-center gap-1.5 text-xs text-zinc-500 hover:text-white transition cursor-pointer">
             <ArrowLeft className="w-3.5 h-3.5" /> Back to home
           </Link>
         </div>
