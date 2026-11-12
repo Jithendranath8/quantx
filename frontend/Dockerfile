@@ -3,7 +3,7 @@
 # ======================================================================
 
 # ----- Base stage -----
-FROM node:20-alpine AS base
+FROM node:25-alpine AS base
 WORKDIR /app
 # Copy the lockfile too, so `npm ci` has something to install from.
 COPY package.json package-lock.json* ./
