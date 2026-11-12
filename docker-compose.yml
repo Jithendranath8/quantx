@@ -34,6 +34,15 @@ x-backend-env: &backend-env
   environment:
     - POSTGRES_HOST=postgres
     - REDIS_HOST=redis
+    # The signing secrets are required here, not just documented. Without them
+    # the app would fall back to defaults published in the repository; it now
+    # refuses to start on those, and Compose refuses first with a clear message.
+    - SECRET_KEY=${SECRET_KEY:?SECRET_KEY must be set}
+    - JWT_SECRET_KEY=${JWT_SECRET_KEY:?JWT_SECRET_KEY must be set}
+    # Trust X-Forwarded-For from the nginx container only (its address is fixed
+    # below). Left at the image default, every client appears to come from
+    # nginx and they all share one rate-limit bucket. Never set this to '*'.
+    - FORWARDED_ALLOW_IPS=${FORWARDED_ALLOW_IPS:-172.31.250.10}
     - CELERY_BROKER_URL=redis://:${REDIS_PASSWORD:?REDIS_PASSWORD must be set}@redis-broker:6379/1
     - CELERY_RESULT_BACKEND=redis://:${REDIS_PASSWORD:?REDIS_PASSWORD must be set}@redis-broker:6379/2
 
@@ -197,8 +206,14 @@ services:
       target: production
     container_name: quantx-frontend
     restart: unless-stopped
+    # Loopback by default: this serves plain HTTP, so it belongs behind a
+    # TLS-terminating proxy. Set FRONTEND_BIND=0.0.0.0 only on a trusted network.
     ports:
-      - "5173:80"
+      - "${FRONTEND_BIND:-127.0.0.1}:5173:80"
+    # A fixed address, so the backend can trust exactly this proxy.
+    networks:
+      default:
+        ipv4_address: 172.31.250.10
     depends_on:
       backend:
         condition: service_started
@@ -241,6 +256,12 @@ services:
     depends_on:
       prometheus:
         condition: service_started
+
+networks:
+  default:
+    ipam:
+      config:
+        - subnet: 172.31.250.0/24
 
 volumes:
   postgres_data:
