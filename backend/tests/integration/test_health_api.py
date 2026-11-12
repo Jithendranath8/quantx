@@ -107,7 +107,7 @@ class TestAIServiceHealth:
 
     @pytest.mark.asyncio
     async def test_all_failed_calls_report_degraded(
-        self, client: AsyncClient, auth_headers: dict, db_session, stub_binance, monkeypatch
+        self, client: AsyncClient, admin_headers: dict, db_session, stub_binance, monkeypatch
     ) -> None:
         """A window where every call fell back to WAIT means the provider is failing."""
         from datetime import UTC, datetime
@@ -137,7 +137,7 @@ class TestAIServiceHealth:
             )
         await db_session.commit()
 
-        response = await client.get("/api/v1/health/system", headers=auth_headers)
+        response = await client.get("/api/v1/health/system", headers=admin_headers)
         ai = response.json()["subsystems"]["ai_service"]
         assert ai["status"] == "DEGRADED"
         assert ai["healthy"] is False
@@ -146,7 +146,7 @@ class TestAIServiceHealth:
 
     @pytest.mark.asyncio
     async def test_reasoned_waits_report_operational(
-        self, client: AsyncClient, auth_headers: dict, db_session, stub_binance, monkeypatch
+        self, client: AsyncClient, admin_headers: dict, db_session, stub_binance, monkeypatch
     ) -> None:
         """A model that answers but chooses to wait is a working provider, not a failing one."""
         from datetime import UTC, datetime
@@ -173,7 +173,7 @@ class TestAIServiceHealth:
             )
         await db_session.commit()
 
-        response = await client.get("/api/v1/health/system", headers=auth_headers)
+        response = await client.get("/api/v1/health/system", headers=admin_headers)
         ai = response.json()["subsystems"]["ai_service"]
         assert ai["status"] == "OPERATIONAL"
         assert ai["healthy"] is True
@@ -182,7 +182,7 @@ class TestAIServiceHealth:
 
     @pytest.mark.asyncio
     async def test_a_real_decision_reports_operational(
-        self, client: AsyncClient, auth_headers: dict, db_session, stub_binance, monkeypatch
+        self, client: AsyncClient, admin_headers: dict, db_session, stub_binance, monkeypatch
     ) -> None:
         """One successful directional call proves the provider works."""
         from datetime import UTC, datetime
@@ -208,7 +208,7 @@ class TestAIServiceHealth:
         )
         await db_session.commit()
 
-        response = await client.get("/api/v1/health/system", headers=auth_headers)
+        response = await client.get("/api/v1/health/system", headers=admin_headers)
         ai = response.json()["subsystems"]["ai_service"]
         assert ai["status"] == "OPERATIONAL"
         assert ai["healthy"] is True
