@@ -196,9 +196,16 @@ class AuthService:
         email: str,
         full_name: str | None,
         provider: str,
+        subject: str,
         ip_address: str | None = None,
     ) -> User:
-        """Find or create the account for a provider-verified email.
+        """Find or create the account for a provider identity.
+
+        The account is identified by (provider, subject): the provider's own
+        stable id for the person. The verified email only decides which account
+        a first sign-in creates or claims. Matching on email alone meant any
+        identity reporting the same address, on either provider, opened the
+        account, and an address can change hands.
 
         Only accounts the provider flow created are reachable this way.
         Password registration does not verify email ownership, so an existing
@@ -208,18 +215,36 @@ class AuthService:
         account gets a random, never-disclosed password.
 
         Raises:
-            OAuthSignInError: If a password account already holds the email, or the account is disabled.
+            OAuthSignInError: If a password account already holds the email,
+                the account belongs to a different provider identity, or the
+                account is disabled.
         """
-        user = await self._user_repo.get_by_email(email)
         created = False
+        user = await self._user_repo.get_by_oauth_identity(provider, subject)
         if user is None:
-            user, created = await self._create_oauth_user(email, full_name, provider)
-        if user.oauth_provider is None:
-            raise OAuthSignInError(
-                "password_account_exists",
-                "An account with this email is already registered with a password. "
-                "Sign in with your email and password instead.",
-            )
+            user = await self._user_repo.get_by_email(email)
+            if user is None:
+                user, created = await self._create_oauth_user(email, full_name, provider, subject)
+            if user.oauth_provider is None:
+                raise OAuthSignInError(
+                    "password_account_exists",
+                    "An account with this email is already registered with a password. "
+                    "Sign in with your email and password instead.",
+                )
+            if user.oauth_provider != provider:
+                raise OAuthSignInError(
+                    "provider_mismatch",
+                    "This account signs in with a different provider. Use the one you signed up with.",
+                )
+            if user.oauth_subject is None:
+                # Created before subjects were recorded: bind it on this first
+                # sign-in so every later one is checked.
+                user.oauth_subject = subject
+            elif user.oauth_subject != subject:
+                raise OAuthSignInError(
+                    "identity_mismatch",
+                    "This email belongs to an account created by a different sign-in identity.",
+                )
         if not user.is_active:
             raise OAuthSignInError("account_disabled", "Account is deactivated")
 
@@ -235,7 +260,9 @@ class AuthService:
         logger.info("user_oauth_sign_in", user_id=str(user.id), provider=provider, created=created)
         return user
 
-    async def _create_oauth_user(self, email: str, full_name: str | None, provider: str) -> tuple[User, bool]:
+    async def _create_oauth_user(
+        self, email: str, full_name: str | None, provider: str, subject: str
+    ) -> tuple[User, bool]:
         """Create the provider account, tolerating a concurrent first sign-in.
 
         Two first sign-ins can race on the unique email or a generated
@@ -256,6 +283,7 @@ class AuthService:
                         full_name=full_name[:100] if full_name else None,
                     )
                     user.oauth_provider = provider
+                    user.oauth_subject = subject
                     await self._session.flush()
                 return user, True
             except IntegrityError:
@@ -264,7 +292,9 @@ class AuthService:
                     return existing, False
         raise ConflictError("User", "username", email.split("@")[0])
 
-    async def link_oauth(self, user_id: str, email: str, provider: str, ip_address: str | None = None) -> User:
+    async def link_oauth(
+        self, user_id: str, email: str, provider: str, subject: str, ip_address: str | None = None
+    ) -> User:
         """Attach a provider to an account its owner is signed in to.
 
         The link was started by an authenticated request, and the provider has
@@ -283,8 +313,14 @@ class AuthService:
             raise OAuthSignInError(
                 "email_mismatch", "The provider account's verified email is not this account's email."
             )
+        claimed = await self._user_repo.get_by_oauth_identity(provider, subject)
+        if claimed is not None and claimed.id != user.id:
+            raise OAuthSignInError("identity_in_use", "That provider account is already linked to another user.")
         if user.oauth_provider is None:
             user.oauth_provider = provider
+            user.oauth_subject = subject
+        elif user.oauth_provider == provider and user.oauth_subject is None:
+            user.oauth_subject = subject
         await self._audit_repo.log(
             action="user.oauth_linked",
             user_id=user.id,

@@ -70,6 +70,12 @@ class UserRepository:
         result = await self._session.execute(stmt)
         return result.scalar_one_or_none()
 
+    async def get_by_oauth_identity(self, provider: str, subject: str) -> User | None:
+        """Find the account bound to a provider's stable subject id."""
+        stmt = select(User).where(User.oauth_provider == provider, User.oauth_subject == subject)
+        result = await self._session.execute(stmt)
+        return result.scalar_one_or_none()
+
     async def get_by_email(self, email: str) -> User | None:
         """Find a user by email address.
 

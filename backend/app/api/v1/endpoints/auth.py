@@ -245,11 +245,11 @@ async def oauth_callback(
         if stored.get("link_user_id"):
             linking = True
             link_code = await oauth.issue_link_code(
-                str(stored["link_user_id"]), provider, identity.email, str(stored["nonce"])
+                str(stored["link_user_id"]), provider, identity.email, str(stored["nonce"]), identity.subject
             )
             return _frontend_redirect(f"link_code={quote(link_code)}")
         user = await AuthService(db).resolve_oauth_user(
-            identity.email, identity.full_name, provider, ip_address=_get_client_ip(request)
+            identity.email, identity.full_name, provider, identity.subject, ip_address=_get_client_ip(request)
         )
         login_code = await oauth.issue_login_code(str(user.id), str(stored["nonce"]))
     except OAuthSignInError as exc:
@@ -297,8 +297,12 @@ async def oauth_link_complete(
     redis: Annotated[Redis, Depends(get_redis_client)],  # type: ignore[type-arg]
 ) -> UserResponse:
     """Attach the provider once the same user, in the same browser, confirms."""
-    provider, email = await OAuthService(redis).redeem_link_code(data.code, data.client_nonce, str(user_id))
-    user = await AuthService(db).link_oauth(str(user_id), email, provider, ip_address=_get_client_ip(request))
+    provider, email, subject = await OAuthService(redis).redeem_link_code(
+        data.code, data.client_nonce, str(user_id)
+    )
+    user = await AuthService(db).link_oauth(
+        str(user_id), email, provider, subject, ip_address=_get_client_ip(request)
+    )
     return UserResponse.model_validate(user)
 
 

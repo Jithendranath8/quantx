@@ -85,10 +85,15 @@ PROVIDERS: dict[str, OAuthProvider] = {
 
 @dataclass(frozen=True)
 class OAuthIdentity:
-    """What QuantX needs from a provider: a verified email and a display name."""
+    """What QuantX needs from a provider: who it is, a verified email, a name.
+
+    ``subject`` is the provider's permanent id for the person (Google ``sub``,
+    GitHub ``id``). The account is bound to it, not to the email.
+    """
 
     email: str
     full_name: str | None
+    subject: str
 
 
 def _credentials(provider: str) -> tuple[str, str]:
@@ -203,17 +208,27 @@ class OAuthService:
         )
         return code
 
-    async def issue_link_code(self, user_id: str, provider: str, email: str, nonce_digest: str) -> str:
+    async def issue_link_code(
+        self, user_id: str, provider: str, email: str, nonce_digest: str, subject: str
+    ) -> str:
         """Store a pending link that only its starting user and browser can complete."""
         code = secrets.token_urlsafe(32)
         await self._redis.set(
             _LINK_KEY.format(code),
-            json.dumps({"user_id": user_id, "provider": provider, "email": email, "nonce": nonce_digest}),
+            json.dumps(
+                {
+                    "user_id": user_id,
+                    "provider": provider,
+                    "email": email,
+                    "nonce": nonce_digest,
+                    "subject": subject,
+                }
+            ),
             ex=LOGIN_CODE_TTL_SECONDS,
         )
         return code
 
-    async def redeem_link_code(self, code: str, client_nonce: str, user_id: str) -> tuple[str, str]:
+    async def redeem_link_code(self, code: str, client_nonce: str, user_id: str) -> tuple[str, str, str]:
         """Consume a pending link for the signed-in user; returns (provider, verified email).
 
         Both checks matter: the nonce proves this browser started the link, and
@@ -229,7 +244,7 @@ class OAuthService:
         ) != str(user_id):
             logger.warning("oauth_link_code_mismatch")
             raise AuthenticationError("This link was started in a different browser or account. Please try again.")
-        return str(stored["provider"]), str(stored["email"])
+        return str(stored["provider"]), str(stored["email"]), str(stored["subject"])
 
     async def redeem_login_code(self, code: str, client_nonce: str) -> str:
         """Return the user id behind a one-time code, consuming it.
@@ -286,9 +301,12 @@ class OAuthService:
             headers={"Authorization": f"Bearer {token}"},
         )
         info = response.json()
-        if response.status_code != 200 or not info.get("email") or not info.get("email_verified"):
+        # ``is True``, not truthiness: the string "false" is truthy.
+        if response.status_code != 200 or not info.get("email") or info.get("email_verified") is not True:
             raise OAuthSignInError("no_verified_email", "Google did not return a verified email address.")
-        return OAuthIdentity(email=str(info["email"]).lower(), full_name=info.get("name"))
+        if not info.get("sub"):
+            raise OAuthSignInError("profile_unreadable", "Google did not return an account identifier.")
+        return OAuthIdentity(email=str(info["email"]).lower(), full_name=info.get("name"), subject=str(info["sub"]))
 
     @staticmethod
     async def _github_identity(http: httpx.AsyncClient, token: str) -> OAuthIdentity:
@@ -299,9 +317,17 @@ class OAuthService:
             raise OAuthSignInError("profile_unreadable", "GitHub profile could not be read.")
         # The public profile email may be absent or unverified; only the
         # primary, verified address is trusted to identify the account.
-        primary = next((e for e in emails.json() if e.get("primary") and e.get("verified")), None)
+        primary = next(
+            (e for e in emails.json() if e.get("primary") is True and e.get("verified") is True), None
+        )
         if primary is None:
             raise OAuthSignInError("no_verified_email", "Your GitHub account has no verified primary email.")
         profile = user.json()
-        return OAuthIdentity(email=str(primary["email"]).lower(), full_name=profile.get("name") or profile.get("login"))
+        if profile.get("id") is None:
+            raise OAuthSignInError("profile_unreadable", "GitHub did not return an account identifier.")
+        return OAuthIdentity(
+            email=str(primary["email"]).lower(),
+            full_name=profile.get("name") or profile.get("login"),
+            subject=str(profile["id"]),
+        )
 

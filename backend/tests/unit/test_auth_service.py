@@ -239,6 +239,6 @@ class TestOAuthAccountCreationRace:
             return next(names)
 
         monkeypatch.setattr(service, "_available_username", racing_username)
-        user = await service.resolve_oauth_user("newcomer@example.com", "New Comer", "google")
+        user = await service.resolve_oauth_user("newcomer@example.com", "New Comer", "google", "google-sub-new")
         assert user.username == "fresh-name"
         assert user.oauth_provider == "google"
