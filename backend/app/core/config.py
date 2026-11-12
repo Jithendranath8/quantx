@@ -283,6 +283,11 @@ class Settings(BaseSettings):
     # Hard ceiling on tool-calling iterations per agent run, so a model that
     # keeps requesting tools can never loop forever or exhaust the budget.
     agent_max_tool_iterations: int = 8
+    # Wall-clock ceiling for one agent request. The iteration cap bounds the
+    # number of model calls but not how long each one takes.
+    agent_run_timeout_seconds: int = 240
+    # Agent requests one user may have running at once, per worker.
+    agent_max_concurrent_per_user: int = 2
 
     @field_validator("anthropic_api_key", mode="before")
     @classmethod
