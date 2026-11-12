@@ -343,6 +343,9 @@ class Settings(BaseSettings):
 
     # ── Rate Limiting ────────────────────────────────────────────────────
     rate_limit_enabled: bool = True
+    # Backstop for every API route, per user or per address. Generous on
+    # purpose: a normal session with several open pages stays well under it.
+    rate_limit_global_per_minute: int = 900
     rate_limit_login_per_minute: int = 10
     rate_limit_default_per_minute: int = 120
     rate_limit_expensive_per_minute: int = 10

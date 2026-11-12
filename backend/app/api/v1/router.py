@@ -2,7 +2,7 @@
 QuantX — API v1 Router Aggregator.
 """
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 
 from app.api.v1.endpoints.agent import router as agent_router
 from app.api.v1.endpoints.analytics import router as analytics_router
@@ -22,8 +22,15 @@ from app.api.v1.endpoints.paper_trading import router as paper_trading_router
 from app.api.v1.endpoints.research import router as research_router
 from app.api.v1.endpoints.risk import router as risk_router
 from app.api.v1.endpoints.strategies import router as strategies_router
+from app.core.config import get_settings
+from app.core.dependencies import RateLimiter
 
-api_v1_router = APIRouter()
+# A ceiling on every API route, counted per user (or per address when there is
+# no valid token). Individual routes set tighter limits; this is the backstop
+# for the ones that set none, so no route is ever unthrottled.
+api_v1_router = APIRouter(
+    dependencies=[Depends(RateLimiter("api_global", get_settings().rate_limit_global_per_minute))]
+)
 
 # Authentication & Access Control
 api_v1_router.include_router(auth_router)

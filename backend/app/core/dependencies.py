@@ -133,16 +133,90 @@ async def require_superuser(
     return current_user
 
 
+async def require_live_trader(
+    current_user: Annotated[User, Depends(get_current_user)],
+) -> User:
+    """Ensure the current user may place orders on the operator's exchange account.
+
+    Raises:
+        AuthorizationError: If live trading has not been granted to this account.
+    """
+    if not current_user.can_trade_live:
+        raise AuthorizationError(
+            "Live trading is not enabled for this account. Ask the operator to grant it."
+        )
+    return current_user
+
+
+class _LocalWindowCounter:
+    """In-process fixed-window counter, used when Redis cannot be reached.
+
+    Per worker and approximate, but it means a Redis outage degrades rate
+    limiting instead of switching it off. Failing fully open made an outage (or
+    anything that exhausted the Redis pool) remove the brute-force limit on
+    login and the throttle on live orders at the same moment.
+    """
+
+    MAX_KEYS = 50_000
+
+    def __init__(self) -> None:
+        self._windows: dict[str, tuple[float, int]] = {}
+
+    def hit(self, key: str, window_seconds: int) -> int:
+        """Count one request against ``key`` and return the window's total."""
+        now = time.monotonic()
+        started, count = self._windows.get(key, (now, 0))
+        if now - started >= window_seconds:
+            started, count = now, 0
+        count += 1
+        if len(self._windows) >= self.MAX_KEYS and key not in self._windows:
+            self._prune(now, window_seconds)
+        self._windows[key] = (started, count)
+        return count
+
+    def _prune(self, now: float, window_seconds: int) -> None:
+        expired = [k for k, (started, _) in self._windows.items() if now - started >= window_seconds]
+        for k in expired:
+            del self._windows[k]
+        if len(self._windows) >= self.MAX_KEYS:
+            # Still full of live windows: drop the oldest half rather than grow.
+            for k in sorted(self._windows, key=lambda k: self._windows[k][0])[: self.MAX_KEYS // 2]:
+                del self._windows[k]
+
+
+_local_counter = _LocalWindowCounter()
+
+
+def rate_limit_identity(request: Request) -> str:
+    """Who a request is counted against.
+
+    A request carrying a valid access token is counted per user. Otherwise it
+    is counted per client address. Counting everything per address meant that
+    behind a reverse proxy, where every client can appear to come from the
+    proxy's address, all users shared one bucket and one caller could exhaust
+    it for everybody.
+    """
+    header = request.headers.get("authorization", "")
+    scheme, _, token = header.partition(" ")
+    if scheme.lower() == "bearer" and token:
+        try:
+            return f"user:{verify_access_claims(token.strip())['sub']}"
+        except Exception:
+            pass  # not a valid token: fall through to the address
+    return f"ip:{get_client_ip(request)}"
+
+
 class RateLimiter:
     """Fixed-window rate limiter usable as a route dependency.
 
     Usage:
         @router.post("/expensive", dependencies=[Depends(RateLimiter("backtest", 5))])
 
-    Requests are counted per client IP per scope. Any Redis failure fails *open*
-    (the request proceeds) so a cache outage or an exhausted free-tier quota can
-    never take the API down or lock users out — rate limiting is a protective
-    layer, not a hard dependency of the request path.
+    Requests are counted per authenticated user, or per client address when
+    there is no valid token (see :func:`rate_limit_identity`). The count lives
+    in Redis; if Redis cannot be reached the limiter falls back to an
+    in-process counter, so an outage never blocks a real user and never
+    removes the limit either.
     """
 
     def __init__(self, scope: str, max_requests: int, window_seconds: int = 60) -> None:
@@ -155,7 +229,7 @@ class RateLimiter:
         if not settings.rate_limit_enabled:
             return
 
-        identifier = get_client_ip(request)
+        identifier = rate_limit_identity(request)
         key = f"ratelimit:{self.scope}:{identifier}"
         try:
             manager = RedisManager(await get_redis_client())
@@ -163,15 +237,8 @@ class RateLimiter:
                 key, self.max_requests, self.window_seconds
             )
         except Exception as exc:
-            # Rate limiting is best-effort protection; its backing store must
-            # never block a real user. If Redis is unavailable (outage, or a
-            # free-tier command-quota that is exhausted) the check is skipped —
-            # fail open — and logged. A cache problem must not lock anyone out
-            # of login or take the API down. Brute-force risk during an outage
-            # is mitigated by slow bcrypt hashing and is a far smaller harm than
-            # denying every legitimate request.
-            logger.warning("rate_limit_check_failed", scope=self.scope, error=str(exc))
-            return
+            logger.warning("rate_limit_redis_unavailable", scope=self.scope, error=str(exc))
+            limited = _local_counter.hit(key, self.window_seconds) > self.max_requests
 
         if limited:
             logger.warning("rate_limit_exceeded", scope=self.scope, client=identifier)
@@ -190,6 +257,44 @@ def default_rate_limiter(scope: str) -> RateLimiter:
 def expensive_rate_limiter(scope: str) -> RateLimiter:
     """Rate limiter for CPU- or upstream-heavy endpoints."""
     return RateLimiter(scope, get_settings().rate_limit_expensive_per_minute)
+
+
+class ConcurrencyLimit:
+    """Caps how many requests of one kind a single user can have in flight.
+
+    A per-minute rate limit does not bound work that lasts longer than a
+    minute. Agent runs wait on a model for a long time, so a handful of
+    in-limit requests could hold a worker's resources indefinitely.
+
+    Usage:
+        async with agent_runs.slot(str(user.id)):
+            ...
+    """
+
+    def __init__(self, scope: str, max_concurrent: int) -> None:
+        self.scope = scope
+        self.max_concurrent = max_concurrent
+        self._in_flight: dict[str, int] = {}
+
+    @asynccontextmanager
+    async def slot(self, identity: str) -> AsyncIterator[None]:
+        """Hold one slot for ``identity``; refuse when they are all taken."""
+        current = self._in_flight.get(identity, 0)
+        if current >= self.max_concurrent:
+            raise RateLimitError(
+                f"Too many concurrent {self.scope} requests. "
+                f"Wait for one of your {self.max_concurrent} running requests to finish.",
+                retry_after_seconds=10,
+            )
+        self._in_flight[identity] = current + 1
+        try:
+            yield
+        finally:
+            remaining = self._in_flight.get(identity, 1) - 1
+            if remaining <= 0:
+                self._in_flight.pop(identity, None)
+            else:
+                self._in_flight[identity] = remaining
 
 
 class PaginationParams:
