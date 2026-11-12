@@ -101,13 +101,13 @@ export function useMarketStream(
         return;
       }
 
-      const url = `${wsBase()}/ws/market/${encodeURIComponent(
-        symbol,
-      )}?token=${encodeURIComponent(token)}`;
+      const url = `${wsBase()}/ws/market/${encodeURIComponent(symbol)}`;
 
       setStatus('connecting');
       closedByUs.current = false;
-      const socket = new WebSocket(url);
+      // The token is offered as a WebSocket subprotocol, not in the URL: a
+      // query string is written to proxy and server access logs.
+      const socket = new WebSocket(url, ['quantx.bearer', token]);
       socketRef.current = socket;
 
       socket.onopen = () => {
