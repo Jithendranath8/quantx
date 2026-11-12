@@ -36,6 +36,8 @@ exec docker run --rm --network "$NETWORK" \
   -e REDIS_HOST=redis \
   -e REDIS_DB=9 \
   -e OPENAI_API_KEY= -e OPENAI_BASE_URL= -e OPENAI_MODEL= \
+  -e OAUTH_GOOGLE_CLIENT_ID= -e OAUTH_GOOGLE_CLIENT_SECRET= \
+  -e OAUTH_GITHUB_CLIENT_ID= -e OAUTH_GITHUB_CLIENT_SECRET= \
   -e MARKET_STREAM_ENABLED=false \
   -e RATE_LIMIT_ENABLED=false \
   -e TEST_DATABASE_URL="postgresql+asyncpg://quantx:${PW}@postgres:5432/quantx_test" \
