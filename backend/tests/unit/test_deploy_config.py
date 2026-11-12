@@ -170,6 +170,9 @@ def test_production_warnings_name_the_weak_settings() -> None:
         DATABASE_URL="postgresql://u:p@ep.neon.tech/db",
         REDIS_URL="rediss://default:tok@up.upstash.io:6379",
         rate_limit_enabled=False,
+        # Set explicitly: the metrics warning only applies while metrics are
+        # served, and the test environment may have them switched off.
+        prometheus_enabled=True,
         metrics_require_auth=False,
         allowed_origins="http://localhost:5173",
         forwarded_allow_ips="127.0.0.1",

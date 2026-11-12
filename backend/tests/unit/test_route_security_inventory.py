@@ -36,6 +36,10 @@ PUBLIC_ROUTES: dict[tuple[str, str], str] = {
     ("GET", "/metrics"): "authenticated by the metrics password",
 }
 
+# Listed above but only registered when the feature is switched on, so their
+# absence is not a stale entry.
+OPTIONAL_ROUTES = {("GET", "/metrics")}  # PROMETHEUS_ENABLED
+
 # Routes that send signed requests to the exchange to open risk.
 LIVE_ORDER_ROUTES = {("POST", "/api/v1/live/orders")}
 
@@ -93,7 +97,7 @@ def test_every_route_requires_a_signed_in_user_unless_listed_public() -> None:
 
 def test_the_public_list_has_no_stale_entries() -> None:
     existing = {(method, path) for method, path, _ in _api_routes()}
-    assert set(PUBLIC_ROUTES) - existing == set()
+    assert set(PUBLIC_ROUTES) - existing - OPTIONAL_ROUTES == set()
 
 
 def test_public_routes_stay_public_on_purpose() -> None:
