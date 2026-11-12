@@ -48,6 +48,24 @@ backend/env/
 .env
 .env.local
 .env.*.local
+# Filled-in copies of the shipped examples, and any per-environment file.
+.env.deploy
+.env.production
+.env.staging
+.env.development
+.env.test
+backend/.env*
+frontend/.env*
+!.env.example
+!.env.deploy.example
+!backend/.env.example
+!frontend/.env.example
+# Key material and credentials, wherever they land.
+*.pem
+*.key
+*.p12
+*.pfx
+credentials.json
 
 ## IDE
 .vscode/
@@ -103,3 +121,4 @@ monitoring/prometheus/metrics_password
 ## Editor/assistant tooling
 # Claude Code config and skills are local to each developer.
 .claude/
+/docs/
