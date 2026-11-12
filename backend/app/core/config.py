@@ -79,6 +79,9 @@ class Settings(BaseSettings):
     backend_port: int = 8000
     backend_workers: int = 4
     allowed_origins: str = "http://localhost:5173,http://localhost:3000"
+    # Largest request body the API will read. Every route takes small JSON; the
+    # limit exists because bodies are parsed before authentication runs.
+    max_request_body_bytes: int = 1_048_576
 
     # ── OAuth 2.0 sign-in ────────────────────────────────────────────────
     # Each provider is offered only when both its client id and secret are set.

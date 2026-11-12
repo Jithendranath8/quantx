@@ -12,6 +12,7 @@ import uuid
 
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+from starlette.concurrency import run_in_threadpool
 
 from app.core.config import get_settings
 from app.core.exceptions import (
@@ -100,7 +101,10 @@ class AuthService:
             raise ConflictError("User", "username", data.username)
 
         # Create user
-        hashed_pw = hash_password(data.password)
+        # bcrypt is deliberately slow (hundreds of ms of CPU). Run inline it
+        # stalls the event loop for every other request, and these routes are
+        # reachable without an account, so it goes to a worker thread.
+        hashed_pw = await run_in_threadpool(hash_password, data.password)
         user = await self._user_repo.create(
             email=data.email,
             username=data.username,
@@ -154,10 +158,10 @@ class AuthService:
             # code called hash_password() here, generating a brand-new bcrypt
             # hash (12 rounds, ~250ms of CPU) that nothing ever read -- making
             # an unauthenticated endpoint a CPU-exhaustion lever.
-            verify_password(password, _DUMMY_PASSWORD_HASH)
+            await run_in_threadpool(verify_password, password, _DUMMY_PASSWORD_HASH)
             raise InvalidCredentialsError()
 
-        if not verify_password(password, user.hashed_password):
+        if not await run_in_threadpool(verify_password, password, user.hashed_password):
             await self._audit_repo.log(
                 action="user.login_failed",
                 user_id=user.id,

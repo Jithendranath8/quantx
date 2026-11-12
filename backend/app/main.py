@@ -33,6 +33,7 @@ from app.core.exceptions import (
     ValidationError,
 )
 from app.core.logging import get_logger, setup_logging
+from app.core.middleware import BodySizeLimitMiddleware, SecurityHeadersMiddleware
 from app.core.redis import close_redis, get_redis_client
 from app.websockets.binance_stream import start_market_stream, stop_market_stream
 from app.workers.market_data import _sync_market_data
@@ -136,6 +137,11 @@ app.add_middleware(
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type", "Accept"],
 )
+
+# Added after CORS so they sit outside it: an oversized body is refused before
+# anything else looks at the request, and every response carries the headers.
+app.add_middleware(SecurityHeadersMiddleware)
+app.add_middleware(BodySizeLimitMiddleware, max_bytes=settings.max_request_body_bytes)
 
 # ── Prometheus Instrumentation ───────────────────────────────────────
 
