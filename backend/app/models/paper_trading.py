@@ -7,7 +7,7 @@ Stores virtual trading accounts, orders, positions, and execution fills.
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, Float, String
+from sqlalchemy import DateTime, Float, Index, String, text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -87,3 +87,16 @@ class PaperPosition(Base):
     stop_loss: Mapped[float | None] = mapped_column(Float, nullable=True)
     take_profit: Mapped[float | None] = mapped_column(Float, nullable=True)
     status: Mapped[str] = mapped_column(String(30), nullable=False, default="OPEN")  # OPEN, CLOSED
+
+    # One open position per account and symbol, enforced by the database. The
+    # fill code assumes it; when the assumption broke, every later fill sweep
+    # raised and no user's resting orders were filled.
+    __table_args__ = (
+        Index(
+            "uq_paper_positions_open_account_symbol",
+            "account_id",
+            "symbol",
+            unique=True,
+            postgresql_where=text("status = 'OPEN'"),
+        ),
+    )
