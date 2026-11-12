@@ -170,6 +170,7 @@ class RefreshTokenRepository:
         user_id: uuid.UUID,
         token: str,
         expires_at: datetime | None = None,
+        family_id: uuid.UUID | None = None,
     ) -> RefreshToken:
         """Store a new refresh token (hashed).
 
@@ -177,6 +178,7 @@ class RefreshTokenRepository:
             user_id: The user's UUID.
             token: The raw refresh token string.
             expires_at: Absolute expiry; defaults to the configured lifetime.
+            family_id: The sign-in this token continues; a new one when omitted.
 
         Returns:
             The created RefreshToken record.
@@ -191,10 +193,49 @@ class RefreshTokenRepository:
             user_id=user_id,
             token_hash=self._hash_token(token),
             expires_at=expires_at,
+            family_id=family_id or uuid.uuid4(),
         )
         self._session.add(refresh)
         await self._session.flush()
         return refresh
+
+    async def consume(self, token: str) -> tuple[uuid.UUID, uuid.UUID | None] | None:
+        """Atomically redeem a refresh token, returning (user_id, family_id).
+
+        One conditional UPDATE both checks and revokes, so of two overlapping
+        redemptions exactly one sees the row. A separate SELECT followed by an
+        UPDATE let both succeed and forked the session with no reuse alarm.
+
+        Returns:
+            None when the token is unknown, already used, revoked or expired.
+        """
+        stmt = (
+            update(RefreshToken)
+            .where(
+                RefreshToken.token_hash == self._hash_token(token),
+                RefreshToken.is_revoked.is_(False),
+                RefreshToken.expires_at > datetime.now(UTC),
+            )
+            .values(is_revoked=True, updated_at=datetime.now(UTC))
+            .returning(RefreshToken.user_id, RefreshToken.family_id)
+        )
+        row = (await self._session.execute(stmt)).first()
+        if row is None:
+            return None
+        return row[0], row[1]
+
+    async def family_alive(self, family_id: uuid.UUID) -> bool:
+        """Whether a sign-in still has an unrevoked, unexpired refresh token."""
+        stmt = (
+            select(RefreshToken.id)
+            .where(
+                RefreshToken.family_id == family_id,
+                RefreshToken.is_revoked.is_(False),
+                RefreshToken.expires_at > datetime.now(UTC),
+            )
+            .limit(1)
+        )
+        return (await self._session.execute(stmt)).first() is not None
 
     async def find_by_token(self, token: str) -> RefreshToken | None:
         """Find a refresh token record by its raw token value.

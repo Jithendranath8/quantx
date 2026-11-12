@@ -146,13 +146,17 @@ class TestRefreshToken:
         with pytest.raises(TokenInvalidError, match="Not a refresh token"):
             verify_refresh_token(token)
 
-    def test_token_without_subject_rejects(self) -> None:
-        """Token without sub claim should raise TokenInvalidError."""
-        payload = {
-            "exp": datetime.now(UTC) + timedelta(hours=1),
-            "type": "access",
-        }
+    @pytest.mark.parametrize("missing", ["sub", "exp", "iat"])
+    def test_token_missing_a_required_claim_rejects(self, missing: str) -> None:
+        """A correctly signed token must still carry sub, exp and iat.
+
+        Without exp it would be accepted forever; the decoder now requires all
+        three instead of leaving it to each caller to check.
+        """
+        now = datetime.now(UTC)
+        payload = {"sub": "user-123", "exp": now + timedelta(hours=1), "iat": now, "type": "access"}
+        del payload[missing]
         token = jwt.encode(payload, settings.jwt_secret_key, algorithm=settings.jwt_algorithm)
 
-        with pytest.raises(TokenInvalidError, match="Token missing subject"):
+        with pytest.raises(TokenInvalidError):
             verify_access_token(token)

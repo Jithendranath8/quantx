@@ -5,7 +5,11 @@ Provides reusable dependencies for authentication, database sessions,
 Redis clients, rate limiting, and pagination that are injected via Depends().
 """
 
-from typing import Annotated
+import time
+import uuid
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+from typing import Annotated, Any
 
 from fastapi import Depends, Request
 from fastapi.security import OAuth2PasswordBearer
@@ -16,7 +20,7 @@ from app.core.database import get_async_session
 from app.core.exceptions import AuthenticationError, AuthorizationError, RateLimitError
 from app.core.logging import get_logger
 from app.core.redis import RedisManager, get_redis_client
-from app.core.security import verify_access_token
+from app.core.security import verify_access_claims
 from app.models.user import User
 
 logger = get_logger(__name__)
@@ -36,45 +40,80 @@ def get_client_ip(request: Request) -> str:
     return request.client.host
 
 
-async def get_current_user_id(
+async def get_access_claims(
     token: Annotated[str, Depends(oauth2_scheme)],
-) -> str:
-    """Extract and validate the current user ID from the JWT token.
-
-    This is the core authentication dependency. It verifies the access
-    token and returns the user's ID (UUID string).
+) -> dict[str, Any]:
+    """Verify the bearer token's signature, type and expiry.
 
     Raises:
         AuthenticationError: If the token is invalid or expired.
     """
     try:
-        return verify_access_token(token)
+        return verify_access_claims(token)
     except Exception as e:
         raise AuthenticationError(str(e)) from e
 
 
+async def authenticate_claims(claims: dict[str, Any], db: AsyncSession) -> User:
+    """Turn verified access-token claims into a live, authorised user.
+
+    A valid signature is not enough. The account must still exist and be
+    active, and the sign-in the token belongs to must not have been ended:
+    logout, "sign out everywhere" and refresh-token reuse detection all revoke
+    the session's refresh tokens, and the access token is refused from that
+    moment instead of lingering until it expires.
+
+    Raises:
+        AuthenticationError: If the user is gone or the session was ended.
+        AuthorizationError: If the user is deactivated.
+    """
+    # Imported here to avoid a circular import at module load.
+    from app.repositories.user_repository import RefreshTokenRepository, UserRepository
+
+    user = await UserRepository(db).get_by_id(str(claims["sub"]))
+    if user is None:
+        raise AuthenticationError("User not found")
+    if not user.is_active:
+        raise AuthorizationError("User account is deactivated")
+
+    session_id = claims.get("sid")
+    if session_id is not None:
+        try:
+            family_id = uuid.UUID(str(session_id))
+        except ValueError as exc:
+            raise AuthenticationError("Invalid session") from exc
+        if not await RefreshTokenRepository(db).family_alive(family_id):
+            raise AuthenticationError("Session has ended. Please sign in again.")
+    # Tokens issued before sessions were tracked carry no ``sid``. They are at
+    # most one access-token lifetime old and simply age out.
+    return user
+
+
 async def get_current_user(
-    user_id: Annotated[str, Depends(get_current_user_id)],
+    claims: Annotated[dict[str, Any], Depends(get_access_claims)],
     db: Annotated[AsyncSession, Depends(get_async_session)],
 ) -> User:
-    """Load the authenticated User record, ensuring the account is active.
+    """Load the authenticated User record for a live session.
 
     Returns the ORM model (not a dict) so routes and services can rely on
     typed attributes such as ``user.id`` and ``user.is_superuser``.
 
     Raises:
-        AuthenticationError: If the user is not found.
+        AuthenticationError: If the user is not found or the session ended.
         AuthorizationError: If the user is deactivated.
     """
-    # Imported here to avoid a circular import at module load.
-    from app.repositories.user_repository import UserRepository
+    return await authenticate_claims(claims, db)
 
-    user = await UserRepository(db).get_by_id(user_id)
-    if user is None:
-        raise AuthenticationError("User not found")
-    if not user.is_active:
-        raise AuthorizationError("User account is deactivated")
-    return user
+
+async def get_current_user_id(
+    user: Annotated[User, Depends(get_current_user)],
+) -> str:
+    """The authenticated user's id.
+
+    Resolved through ``get_current_user`` on purpose: a route that needs only
+    the id must still reject a deactivated account or an ended session.
+    """
+    return str(user.id)
 
 
 # Retained for readability at call sites that want the intent spelled out.

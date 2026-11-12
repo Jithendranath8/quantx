@@ -162,6 +162,9 @@ def decode_token(token: str) -> dict[str, Any]:
                 token,
                 settings.jwt_secret_key,
                 algorithms=[settings.jwt_algorithm],
+                # A correctly signed token with no expiry would otherwise be
+                # accepted forever.
+                options={"require_exp": True, "require_iat": True, "require_sub": True},
             ),
         )
     except JWTError as e:
@@ -185,6 +188,21 @@ def _verify_typed_token(token: str, expected_type: str) -> str:
     if not subject:
         raise TokenInvalidError("Token missing subject")
     return subject
+
+
+def verify_access_claims(token: str) -> dict[str, Any]:
+    """Verify an access token and return its full claim set.
+
+    Raises:
+        TokenInvalidError: If the token is not an access token.
+        TokenExpiredError: If the token has expired.
+    """
+    payload = decode_token(token)
+    if payload.get("type") != "access":
+        raise TokenInvalidError("Not an access token")
+    if not payload.get("sub"):
+        raise TokenInvalidError("Token missing subject")
+    return payload
 
 
 def verify_access_token(token: str) -> str:

@@ -342,11 +342,13 @@ class AuthService:
         except Exception as e:
             raise TokenInvalidError() from e
 
-        # Check if token exists and is not revoked
-        stored_token = await self._token_repo.find_by_token(refresh_token)
-        if stored_token is None:
+        # Redeem the token in one atomic step: it is checked and revoked by a
+        # single statement, so two overlapping requests cannot both succeed.
+        consumed = await self._token_repo.consume(refresh_token)
+        if consumed is None or str(consumed[0]) != user_id:
             logger.warning("refresh_token_reuse_detected", user_id=user_id)
-            # Potential token reuse — revoke all tokens for safety
+            # Unknown, already used or revoked: treat as theft and end every
+            # session. This also ends the access tokens of those sessions.
             await self._token_repo.revoke_all_for_user(uuid.UUID(user_id))
             await self._session.commit()
             raise TokenInvalidError("Refresh token has been revoked")
@@ -354,13 +356,11 @@ class AuthService:
         # Verify user still exists and is active
         user = await self._user_repo.get_by_id(user_id)
         if user is None or not user.is_active:
+            await self._session.commit()
             raise TokenInvalidError("User not found or deactivated")
 
-        # Revoke the old refresh token (rotation)
-        await self._token_repo.revoke(refresh_token)
-
-        # Generate new tokens
-        tokens = await self._create_tokens(user)
+        # The new pair continues the same sign-in.
+        tokens = await self._create_tokens(user, family_id=consumed[1])
 
         await self._audit_repo.log(
             action="user.token_refreshed",
@@ -375,19 +375,29 @@ class AuthService:
     async def logout(
         self,
         refresh_token: str,
-        user_id: str,
         ip_address: str | None = None,
     ) -> MessageResponse:
         """Logout by revoking the provided refresh token.
 
+        The refresh token authenticates its own revocation. Requiring a valid
+        access token as well meant sign-out failed once that token had expired,
+        leaving the session's refresh token redeemable while the client showed
+        the user as signed out.
+
         Args:
             refresh_token: The refresh token to revoke.
-            user_id: The authenticated user's ID.
             ip_address: Client IP for audit logging.
 
         Returns:
             Success message.
         """
+        try:
+            user_id = verify_refresh_token(refresh_token)
+        except Exception:
+            # Expired or malformed: there is nothing left to revoke, and the
+            # caller's intent (be signed out) is already satisfied.
+            return MessageResponse(message="Successfully logged out")
+
         await self._token_repo.revoke(refresh_token, user_id=user_id)
 
         await self._audit_repo.log(
@@ -448,7 +458,7 @@ class AuthService:
 
     # ── Private Helpers ──────────────────────────────────────────────
 
-    async def _create_tokens(self, user: User) -> TokenResponse:
+    async def _create_tokens(self, user: User, family_id: uuid.UUID | None = None) -> TokenResponse:
         """Generate access + refresh tokens and store refresh token hash.
 
         Args:
@@ -457,14 +467,17 @@ class AuthService:
         Returns:
             TokenResponse with both tokens.
         """
+        # A new sign-in starts a session; a rotation continues the one it came
+        # from. The access token names that session so it can be ended early.
+        session_id = family_id or uuid.uuid4()
         access_token = create_access_token(
             subject=str(user.id),
-            extra_claims={"email": user.email, "username": user.username},
+            extra_claims={"email": user.email, "username": user.username, "sid": str(session_id)},
         )
         refresh_token = create_refresh_token(subject=str(user.id))
 
         # Store refresh token hash in database
-        await self._token_repo.create(user.id, refresh_token)
+        await self._token_repo.create(user.id, refresh_token, family_id=session_id)
 
         return TokenResponse(
             access_token=access_token,
