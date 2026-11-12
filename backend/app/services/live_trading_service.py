@@ -13,12 +13,13 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.connectors.binance_client import BinanceClient, get_binance_client
 from app.core.config import get_settings
 from app.core.exceptions import (
+    BinanceRejectedError,
     ConfigurationError,
     NotFoundError,
     OrderRejectedError,
@@ -32,10 +33,20 @@ from app.models.live_trading import LiveOrder
 from app.schemas.live_trading import LiveOrderRequest, LiveOrderResponse
 from app.schemas.risk import RiskConfig, TradeRiskRequest
 from app.services.event_ledger_service import EventLedgerService
+from app.services.live_order_state import apply_exchange_result
 from app.services.notification_service import NotificationService
 from app.services.risk_state_service import RiskStateService
 
 logger = get_logger(__name__)
+
+# Orders the exchange may still execute. They are not fills yet, but the quote
+# they have reserved is already committed, so the risk engine has to count them.
+_WORKING_STATUSES = ("NEW", "PARTIALLY_FILLED", "PENDING_SUBMIT", "UNKNOWN_NEEDS_RECONCILIATION")
+_TERMINAL_STATUSES = frozenset({"CANCELED", "FILLED", "EXPIRED", "REJECTED", "EXPIRED_IN_MATCH"})
+_QTY_EPSILON = 1e-9
+
+# Binance's code for "no such order": the submit never reached the book.
+_UNKNOWN_ORDER_CODE = -2013
 
 
 class LiveTradingService:
@@ -77,7 +88,7 @@ class LiveTradingService:
         config = await self._risk_state.load_config(user_id)
         if config.circuit_breaker_active:
             state = await self._risk_state.get_or_create(user_id)
-            TRADES_EXECUTED_TOTAL.labels(symbol=symbol, side=req.side, status="HALTED").inc()
+            TRADES_EXECUTED_TOTAL.labels(symbol=self._metric_symbol(symbol), side=req.side, status="HALTED").inc()
             raise RiskLimitExceededError(
                 rule="circuit_breaker",
                 message=(
@@ -86,21 +97,45 @@ class LiveTradingService:
                 ),
             )
 
-        # 2. Resolve the reference price from the exchange rather than trusting
-        #    a caller-supplied number or a hardcoded constant.
-        reference_price = req.price or req.stop_price
-        if reference_price is None:
+        # Release the pooled connection before talking to the exchange: holding
+        # an open transaction across network calls lets a few slow orders
+        # exhaust the pool for every other request.
+        await self._session.commit()
+
+        # 2. The price the risk engine sizes the order with is decided by the
+        #    order type, never by which field the caller chose to send. A MARKET
+        #    order fills at the venue's price, so that is what it is sized at;
+        #    limit-family orders are sized at their limit price (the schema
+        #    guarantees it is present). Sizing a MARKET order at a caller-sent
+        #    "price" let any order pass the limits by claiming a price of 1.
+        if req.order_type == "MARKET" or req.price is None:
             reference_price = await self._client.get_price(symbol)
+        else:
+            reference_price = req.price
 
         # 3. Resolve the account balance from the exchange when not supplied.
         if account_balance is None:
             account_balance = await self._resolve_quote_balance(symbol)
 
-        # 4. Remaining hard risk rules, for BUYs only. On spot a SELL can only
-        #    reduce exposure, so sizing limits do not apply to it (the halt above
-        #    still does); scoring it as new exposure blocked exits for no reason.
+        # Marks for the positions already held, fetched before the lock below so
+        # no exchange call happens while it is held.
+        marks = await self._mark_prices(user_id, symbol, reference_price)
+
+        # 4. Serialise the check-then-record step per user. Two concurrent
+        #    orders otherwise each see the book from before the other and both
+        #    pass. The lock lasts until the commit in step 5, by which point the
+        #    new order is a working order the next check will count.
+        await self._session.execute(
+            text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"),
+            {"key": f"live-order:{user_id}"},
+        )
+
         if req.side.upper() == "BUY":
-            await self._enforce_buy_risk(user_id, config, symbol, req, reference_price, account_balance)
+            # Hard risk rules apply to BUYs. On spot a SELL can only reduce
+            # exposure, so sizing limits do not apply to it (the halt still does).
+            await self._enforce_buy_risk(user_id, config, symbol, req, reference_price, account_balance, marks)
+        else:
+            await self._enforce_sell_holdings(user_id, symbol, req)
 
         # 5. Record intent before touching the network.
         client_order_id = f"qx{uuid.uuid4().hex[:30]}"
@@ -127,14 +162,18 @@ class LiveTradingService:
                 order_type=req.order_type,
                 quantity=req.quantity,
                 price=req.price,
-                stop_price=req.stop_price,
+                # A stop on a plain LIMIT order is the caller's declared exit for
+                # risk sizing; only the stop-order types send it to the exchange.
+                stop_price=req.stop_price if req.order_type != "LIMIT" else None,
                 client_order_id=client_order_id,
             )
-        except (ConfigurationError, OrderRejectedError) as exc:
+        except (ConfigurationError, OrderRejectedError, BinanceRejectedError) as exc:
+            # A definite refusal: local pre-flight, the mainnet interlock, or an
+            # explicit exchange rejection. Nothing is working on the exchange.
             order.status = "REJECTED"
             order.rejection_reason = str(exc.message)[:500]
             await self._session.commit()
-            TRADES_EXECUTED_TOTAL.labels(symbol=symbol, side=req.side, status="REJECTED").inc()
+            TRADES_EXECUTED_TOTAL.labels(symbol=self._metric_symbol(symbol), side=req.side, status="REJECTED").inc()
             raise
         except Exception as exc:
             # Unknown outcome: the exchange may or may not have the order.
@@ -149,7 +188,7 @@ class LiveTradingService:
                 client_order_id=client_order_id,
                 error=str(exc),
             )
-            TRADES_EXECUTED_TOTAL.labels(symbol=symbol, side=req.side, status="UNKNOWN").inc()
+            TRADES_EXECUTED_TOTAL.labels(symbol=self._metric_symbol(symbol), side=req.side, status="UNKNOWN").inc()
             raise
 
         # 7. Persist the exchange's own answer.
@@ -172,7 +211,7 @@ class LiveTradingService:
         )
         await self._session.commit()
 
-        TRADES_EXECUTED_TOTAL.labels(symbol=symbol, side=req.side, status=order.status).inc()
+        TRADES_EXECUTED_TOTAL.labels(symbol=self._metric_symbol(symbol), side=req.side, status=order.status).inc()
         return LiveOrderResponse(
             order_id=str(order.exchange_order_id or client_order_id),
             symbol=symbol,
@@ -192,6 +231,7 @@ class LiveTradingService:
         req: LiveOrderRequest,
         reference_price: float,
         quote_balance: float,
+        marks: dict[str, float] | None = None,
     ) -> None:
         """Check a live BUY against the risk engine with the account's real book.
 
@@ -204,14 +244,22 @@ class LiveTradingService:
             RiskLimitExceededError: If any rule rejects the order.
         """
         book = await self._book(user_id)
+        marks = marks or {}
         exposure = 0.0
         for held_symbol, holding in book.holdings.items():
-            try:
-                price = await self._client.get_price(held_symbol)
-            except Exception as exc:
-                logger.warning("live_mark_price_failed", symbol=held_symbol, error=str(exc))
-                price = holding.avg_cost
-            exposure += price * holding.quantity
+            # A missing mark falls back to cost: an unpriceable position must
+            # still count, never silently drop out of the exposure total.
+            exposure += marks.get(held_symbol, holding.avg_cost) * holding.quantity
+
+        # Working BUY orders have not filled, but the quote they reserve is
+        # already committed. Leaving them out let a ladder of resting limit
+        # orders exceed every limit, since none of them was ever "held".
+        open_symbols = set(book.holdings)
+        for working in await self._working_orders(user_id, side="BUY"):
+            remaining = max(0.0, working.quantity - working.filled_quantity)
+            price = working.price or marks.get(working.symbol) or reference_price
+            exposure += remaining * price
+            open_symbols.add(working.symbol)
 
         last_loss = book.last_loss_at.get(symbol)
         request = TradeRiskRequest(
@@ -223,7 +271,7 @@ class LiveTradingService:
             entry_price=reference_price,
             stop_loss_price=req.stop_price,
             current_daily_loss_usd=max(0.0, -book.realized_since_day_start),
-            active_positions_count=len(book.holdings) - (1 if symbol in book.holdings else 0),
+            active_positions_count=len(open_symbols - {symbol}),
             current_exposure_usd=exposure,
             minutes_since_loss_on_symbol=(
                 (datetime.now(UTC) - last_loss).total_seconds() / 60 if last_loss is not None else None
@@ -239,8 +287,73 @@ class LiveTradingService:
         if risk_result.circuit_breaker_triggered and not config.circuit_breaker_active:
             await self._risk_state.set_circuit_breaker(user_id, True, reason)
             await self._session.commit()
-        TRADES_EXECUTED_TOTAL.labels(symbol=symbol, side=req.side, status="RISK_REJECTED").inc()
+        TRADES_EXECUTED_TOTAL.labels(symbol=self._metric_symbol(symbol), side=req.side, status="RISK_REJECTED").inc()
         raise RiskLimitExceededError(rule="risk_engine", message=f"Trade rejected by Risk Engine: {reason}")
+
+    async def _enforce_sell_holdings(self, user_id: uuid.UUID, symbol: str, req: LiveOrderRequest) -> None:
+        """Refuse a live SELL larger than what this user bought through QuantX.
+
+        Every user trades the operator's one exchange account, so without this
+        bound a SELL could dispose of assets the caller never bought: another
+        user's position, or the operator's own holdings. Working SELL orders
+        already reserve part of the holding and are subtracted.
+
+        Raises:
+            RiskLimitExceededError: If the order exceeds the caller's holding.
+        """
+        if self._settings.live_allow_untracked_sells:
+            return
+        book = await self._book(user_id)
+        held = book.holdings.get(symbol)
+        held_quantity = held.quantity if held is not None else 0.0
+        reserved = sum(
+            max(0.0, o.quantity - o.filled_quantity)
+            for o in await self._working_orders(user_id, side="SELL")
+            if o.symbol == symbol
+        )
+        available = max(0.0, held_quantity - reserved)
+        if req.quantity > available + _QTY_EPSILON:
+            TRADES_EXECUTED_TOTAL.labels(symbol=self._metric_symbol(symbol), side=req.side, status="RISK_REJECTED").inc()
+            raise RiskLimitExceededError(
+                rule="sell_exceeds_holdings",
+                message=(
+                    f"Trade rejected: SELL of {req.quantity} {symbol} exceeds the {available:.8f} "
+                    "this account holds through QuantX"
+                ),
+            )
+
+    def _metric_symbol(self, symbol: str) -> str:
+        """Metric label for a symbol: itself if the platform covers it, else OTHER.
+
+        A label value is kept for the life of the process. Labelling with
+        whatever a caller sent would let one user grow the metrics registry
+        without limit, so only configured markets get their own series.
+        """
+        return symbol if symbol in self._settings.market_symbol_list else "OTHER"
+
+    async def _working_orders(self, user_id: uuid.UUID, side: str) -> list[LiveOrder]:
+        """This user's orders on the current venue that may still execute."""
+        stmt = select(LiveOrder).where(
+            LiveOrder.user_id == user_id,
+            LiveOrder.is_testnet == self._client.testnet,
+            LiveOrder.side == side,
+            LiveOrder.status.in_(_WORKING_STATUSES),
+        )
+        return list((await self._session.execute(stmt)).scalars().all())
+
+    async def _mark_prices(self, user_id: uuid.UUID, symbol: str, reference_price: float) -> dict[str, float]:
+        """Current venue price for every symbol the user holds or is working."""
+        book = await self._book(user_id)
+        symbols = set(book.holdings) | {o.symbol for o in await self._working_orders(user_id, side="BUY")}
+        await self._session.commit()  # release the connection before the network calls
+
+        marks: dict[str, float] = {symbol: reference_price}
+        for held_symbol in sorted(symbols - {symbol}):
+            try:
+                marks[held_symbol] = await self._client.get_price(held_symbol)
+            except Exception as exc:
+                logger.warning("live_mark_price_failed", symbol=held_symbol, error=str(exc))
+        return marks
 
     async def _book(self, user_id: uuid.UUID) -> Book:
         """The user's live position book on the current venue, from recorded fills."""
@@ -286,12 +399,34 @@ class LiveTradingService:
         if order is None:
             raise NotFoundError("Live order", str(order_id))
 
+        if order.status in _TERMINAL_STATUSES:
+            return order
+
         if order.exchange_order_id:
             result = await self._client.cancel_order(order.symbol, order.exchange_order_id)
             order.status = result.get("status", "CANCELED")
-        else:
-            order.status = "CANCELED"
+            await self._session.commit()
+            return order
 
+        # No exchange id was ever recorded (the submit's response was lost).
+        # The order may still be working on the exchange, so ask before
+        # declaring it cancelled: marking it CANCELED locally without asking
+        # would drop a live order out of the risk book.
+        try:
+            remote = await self._client.get_order(order.symbol, client_order_id=order.client_order_id)
+        except BinanceRejectedError as exc:
+            code = (exc.details or {}).get("code") if isinstance(exc.details, dict) else None
+            if code != _UNKNOWN_ORDER_CODE:
+                raise
+            # The exchange has never heard of it: the submit did not land.
+            order.status = "CANCELED"
+            await self._session.commit()
+            return order
+
+        self._apply_exchange_result(order, remote)
+        if order.status not in _TERMINAL_STATUSES:
+            result = await self._client.cancel_order(order.symbol, client_order_id=order.client_order_id)
+            order.status = result.get("status", "CANCELED")
         await self._session.commit()
         return order
 
@@ -311,27 +446,7 @@ class LiveTradingService:
     @staticmethod
     def _apply_exchange_result(order: LiveOrder, result: dict[str, Any]) -> None:
         """Copy Binance's response onto the local order record."""
-        order.exchange_order_id = str(result.get("orderId")) if result.get("orderId") else None
-        order.status = result.get("status", "NEW")
-        order.raw_response = result
-
-        executed_qty = float(result.get("executedQty", 0) or 0)
-        order.filled_quantity = executed_qty
-
-        fills = result.get("fills") or []
-        if fills:
-            notional = sum(float(f["price"]) * float(f["qty"]) for f in fills)
-            filled_qty = sum(float(f["qty"]) for f in fills)
-            order.filled_price = notional / filled_qty if filled_qty else None
-            order.commission = sum(float(f.get("commission", 0) or 0) for f in fills)
-            order.commission_asset = fills[0].get("commissionAsset")
-        elif executed_qty and result.get("cummulativeQuoteQty"):
-            order.filled_price = float(result["cummulativeQuoteQty"]) / executed_qty
-
-        if result.get("transactTime"):
-            order.transact_time = datetime.fromtimestamp(
-                int(result["transactTime"]) / 1000, tz=UTC
-            )
+        apply_exchange_result(order, result)
 
 
 async def notify_order_outcome(order: LiveOrder) -> None:

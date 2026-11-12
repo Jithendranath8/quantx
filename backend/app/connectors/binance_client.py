@@ -23,7 +23,7 @@ from urllib.parse import urlencode
 import httpx
 
 from app.core.config import get_settings
-from app.core.exceptions import BinanceError, ConfigurationError, OrderRejectedError
+from app.core.exceptions import BinanceError, BinanceRejectedError, ConfigurationError, OrderRejectedError
 from app.core.logging import get_logger
 
 logger = get_logger(__name__)
@@ -34,6 +34,15 @@ OrderType = Literal["MARKET", "LIMIT", "STOP_LOSS_LIMIT", "TAKE_PROFIT_LIMIT"]
 # Binance returns 429 when a rate limit is breached and 418 once it has started
 # banning the IP. Both carry Retry-After. Anything else is not worth retrying.
 _RETRYABLE_STATUS = {429, 418, 500, 502, 503, 504}
+
+
+def _parse_retry_after(value: str | None, default: float) -> float:
+    """Read a Retry-After header, falling back when it is absent or malformed."""
+    try:
+        parsed = float(value) if value is not None else default
+    except ValueError:
+        return default
+    return parsed if 0 <= parsed < float("inf") else default
 
 
 class BinanceClient:
@@ -158,6 +167,7 @@ class BinanceClient:
         params: dict[str, Any] | None = None,
         signed: bool = False,
         base_url: str | None = None,
+        retry: bool = True,
     ) -> Any:
         """Execute a Binance REST call with retries and error translation.
 
@@ -165,6 +175,13 @@ class BinanceClient:
             base_url: Override the host for this call. Funding rate and open
                 interest live on the FUTURES host, not the SPOT one the client
                 is otherwise bound to.
+            retry: Set False for calls that are not idempotent. An order submit
+                must be sent exactly once: if the response is lost the order may
+                already be working, and re-sending it could execute it twice.
+
+        Raises:
+            BinanceRejectedError: Binance refused the request; nothing happened.
+            BinanceError: The outcome is unknown (timeout, transport, 5xx).
         """
         params = {k: v for k, v in (params or {}).items() if v is not None}
         url = path if base_url is None else f"{base_url.rstrip('/')}{path}"
@@ -180,15 +197,24 @@ class BinanceClient:
             params["signature"] = self._sign(params)
 
         last_error: Exception | None = None
-        for attempt in range(self.MAX_RETRIES):
+        attempts = self.MAX_RETRIES if retry else 1
+        for attempt in range(attempts):
             try:
                 response = await self._client.request(method, url, params=params, headers=req_headers)
 
+                # 418 means the IP is already banned: retrying only extends the
+                # ban. 429 on a non-retryable call was refused before execution.
+                if response.status_code == 418 or (response.status_code == 429 and not retry):
+                    raise BinanceRejectedError(
+                        f"{method} {path} refused by Binance rate limiting (HTTP {response.status_code})",
+                        {"status": response.status_code, "code": None},
+                    )
+
                 if response.status_code in _RETRYABLE_STATUS:
-                    retry_after = float(response.headers.get("Retry-After", 2**attempt))
-                    if attempt == self.MAX_RETRIES - 1:
+                    retry_after = _parse_retry_after(response.headers.get("Retry-After"), 2**attempt)
+                    if attempt == attempts - 1:
                         raise BinanceError(
-                            f"{method} {path} failed after {self.MAX_RETRIES} attempts "
+                            f"{method} {path} failed after {attempts} attempt(s) "
                             f"(HTTP {response.status_code})"
                         )
                     logger.warning(
@@ -207,7 +233,7 @@ class BinanceClient:
                         code, msg = body.get("code"), body.get("msg", response.text)
                     except Exception:
                         code, msg = None, response.text
-                    raise BinanceError(
+                    raise BinanceRejectedError(
                         f"{method} {path} rejected: {msg}",
                         {"status": response.status_code, "code": code},
                     )
@@ -218,7 +244,7 @@ class BinanceClient:
                 raise
             except (httpx.TimeoutException, httpx.TransportError) as exc:
                 last_error = exc
-                if attempt == self.MAX_RETRIES - 1:
+                if attempt == attempts - 1:
                     break
                 await asyncio.sleep(2**attempt)
 
@@ -453,14 +479,29 @@ class BinanceClient:
         result = await self._request("GET", "/api/v3/openOrders", params=params, signed=True)
         return list(result)
 
-    async def get_order(self, symbol: str, order_id: int | str) -> dict[str, Any]:
-        """Fetch a single order's current state."""
+    async def get_order(
+        self,
+        symbol: str,
+        order_id: int | str | None = None,
+        *,
+        client_order_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Fetch a single order's current state.
+
+        Look up by ``client_order_id`` when the exchange id was never recorded,
+        which is exactly the case after a submit whose response was lost.
+
+        Raises:
+            BinanceRejectedError: The exchange has no such order.
+        """
+        if order_id is None and client_order_id is None:
+            raise ValueError("get_order needs an order_id or a client_order_id")
         return cast(
             "dict[str, Any]",
             await self._request(
                 "GET",
                 "/api/v3/order",
-                params={"symbol": symbol.upper(), "orderId": order_id},
+                params={"symbol": symbol.upper(), "orderId": order_id, "origClientOrderId": client_order_id},
                 signed=True,
             ),
         )
@@ -549,7 +590,9 @@ class BinanceClient:
             quantity=quantity,
             testnet=self.testnet,
         )
-        result = await self._request("POST", "/api/v3/order", params=params, signed=True)
+        # Sent exactly once. A lost response leaves the outcome unknown, and the
+        # caller reconciles it by client order id instead of re-submitting.
+        result = await self._request("POST", "/api/v3/order", params=params, signed=True, retry=False)
         logger.info(
             "binance_order_placed",
             symbol=symbol,
@@ -558,15 +601,23 @@ class BinanceClient:
         )
         return cast("dict[str, Any]", result)
 
-    async def cancel_order(self, symbol: str, order_id: int | str) -> dict[str, Any]:
-        """Cancel a single open order."""
+    async def cancel_order(
+        self,
+        symbol: str,
+        order_id: int | str | None = None,
+        *,
+        client_order_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Cancel a single open order, by exchange id or by client order id."""
         self._require_trading_permission("cancel an order")
+        if order_id is None and client_order_id is None:
+            raise ValueError("cancel_order needs an order_id or a client_order_id")
         return cast(
             "dict[str, Any]",
             await self._request(
                 "DELETE",
                 "/api/v3/order",
-                params={"symbol": symbol.upper(), "orderId": order_id},
+                params={"symbol": symbol.upper(), "orderId": order_id, "origClientOrderId": client_order_id},
                 signed=True,
             ),
         )

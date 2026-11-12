@@ -210,6 +210,11 @@ class Settings(BaseSettings):
     # move real money.
     allow_mainnet_trading: bool = False
 
+    # Every user trades the operator's single exchange account, so a live SELL
+    # is limited to what that user bought through QuantX. Set true only on a
+    # single-operator instance that must sell assets acquired elsewhere.
+    live_allow_untracked_sells: bool = False
+
     @property
     def mainnet_trading_enabled(self) -> bool:
         """True only when live mainnet order placement is explicitly permitted."""

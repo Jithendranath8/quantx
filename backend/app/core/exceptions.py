@@ -158,6 +158,15 @@ class BinanceError(ExternalServiceError):
         super().__init__("Binance", message, details)
 
 
+class BinanceRejectedError(BinanceError):
+    """Binance definitively refused a request (HTTP 4xx): nothing was executed.
+
+    Kept distinct from a plain ``BinanceError`` (timeout, transport failure,
+    5xx), whose outcome is unknown. Order code must treat the two differently:
+    a rejection is final, an unknown outcome has to be reconciled.
+    """
+
+
 class OpenAIError(ExternalServiceError):
     """Raised for OpenAI API errors."""
 
