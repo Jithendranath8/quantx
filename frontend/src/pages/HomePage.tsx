@@ -57,6 +57,11 @@ function SiteNav() {
               </a>
             </li>
           ))}
+          <li>
+            <Link reloadDocument to="/blog" className="rounded-full px-3 py-1.5 text-zinc-400 hover:text-white transition-colors cursor-pointer">
+              Blog
+            </Link>
+          </li>
         </ul>
         <div className="ml-auto flex items-center gap-2">
           {!isAuthenticated && (
@@ -96,6 +101,11 @@ function SiteNav() {
                 </a>
               </li>
             ))}
+            <li>
+              <Link reloadDocument to="/blog" className="block rounded-2xl px-4 py-3 text-sm text-zinc-300 hover:bg-white/5">
+                Blog
+              </Link>
+            </li>
           </motion.ul>
         )}
       </AnimatePresence>
@@ -584,6 +594,9 @@ function Footer() {
               <a href={`#${s.id}`} className="hover:text-white cursor-pointer">{s.label}</a>
             </li>
           ))}
+          <li>
+            <Link reloadDocument to="/blog" className="hover:text-white cursor-pointer">Blog</Link>
+          </li>
           <li>
             <Link reloadDocument to="/login" className="hover:text-white cursor-pointer">Sign in</Link>
           </li>

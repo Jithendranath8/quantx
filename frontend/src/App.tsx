@@ -1,4 +1,4 @@
-import React, { lazy } from 'react';
+import React, { Suspense, lazy } from 'react';
 import { BrowserRouter, Navigate, Route, Routes, useLocation } from 'react-router-dom';
 
 import { AuthProvider } from './contexts/AuthContext';
@@ -12,6 +12,7 @@ import LoginPage from './pages/LoginPage';
 
 // App pages load on demand, so the public home and login pages stay light.
 const AgentPage = lazy(() => import('./pages/AgentPage'));
+const BlogPage = lazy(() => import('./pages/BlogPage'));
 const AnalyticsPage = lazy(() => import('./pages/AnalyticsPage'));
 const BacktestPage = lazy(() => import('./pages/BacktestPage'));
 const DashboardPage = lazy(() => import('./pages/DashboardPage'));
@@ -64,6 +65,21 @@ export default function App() {
           <Route path="/" element={<HomePage />} />
           <Route path="/login" element={<LoginPage />} />
           <Route path="/auth/callback" element={<AuthCallbackPage />} />
+          <Route
+            path="/blog"
+            element={
+              <Suspense
+                fallback={
+                  <div className="min-h-screen flex flex-col items-center justify-center gap-4 text-zinc-500 text-sm">
+                    <LogoMark className="w-10 h-10 animate-pulse" />
+                    Loading article…
+                  </div>
+                }
+              >
+                <BlogPage />
+              </Suspense>
+            }
+          />
           <Route path={APP_BASE} element={<ProtectedRoute><AppShell /></ProtectedRoute>}>
             <Route index element={<DashboardPage />} />
             <Route path="market" element={<MarketDataPage />} />
